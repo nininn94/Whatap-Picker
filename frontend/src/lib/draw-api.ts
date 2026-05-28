@@ -45,10 +45,10 @@ export type DrawResponse = {
   prizeName: string | null;
   outOfStock?: boolean;
   drawnAt: string;
-  drawnBy: {
+  drawnBy?: {
     id: string;
     username: string;
-  };
+  } | null;
 };
 
 export type ApiErrorPayload = {
@@ -82,32 +82,33 @@ export async function searchLeads(params: {
   phoneLast4: string;
   eventCode: string;
 }) {
-  return requestJson<LeadSearchResponse>(
+  const response = await requestJson<BackendLeadSearchResponse>(
     `/api/leads/search?${new URLSearchParams(params)}`,
   );
+  return normalizeLeadSearchResponse(response);
 }
 
 export async function drawPrize(params: { leadId: string; eventCode: string }) {
-  return requestJson<DrawResponse>("/api/draw", {
+  const response = await requestJson<DrawResponse>("/api/draw", {
     method: "POST",
     body: JSON.stringify(params),
   });
+  return normalizeDrawResponse(response);
 }
 
 export async function fetchDrawHistory(params: { leadId: string; eventCode: string }) {
-  return requestJson<DrawResponse>(
+  const response = await requestJson<BackendDrawHistoryResponse>(
     `/api/draw/history?${new URLSearchParams(params)}`,
   );
+  return normalizeDrawHistoryResponse(response);
 }
 
 export async function fetchAdminEvents() {
   return requestJson<ApiEvent[]>("/api/admin/events");
 }
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "").replace(/\/+$/, "");
-
 async function requestJson<T>(path: string, init?: RequestInit) {
-  const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+  const url = path.startsWith("http") ? path : `${apiBaseUrl()}${path}`;
   const response = await fetch(url, {
     ...init,
     credentials: "include",
@@ -134,4 +135,70 @@ async function readPayload(response: Response): Promise<ApiErrorPayload | unknow
   } catch {
     return { message: response.statusText || "API 응답을 해석하지 못했습니다." };
   }
+}
+
+type BackendLeadSearchItem = Omit<LeadSearchItem, "aiStatus" | "grade" | "score"> &
+  Partial<Pick<LeadSearchItem, "aiStatus" | "grade" | "score">> & {
+    ai?: {
+      status?: LeadSearchItem["aiStatus"];
+      grade?: LeadSearchItem["grade"];
+      score?: number | null;
+    } | null;
+  };
+
+type BackendLeadSearchResponse = Omit<LeadSearchResponse, "results"> & {
+  results: BackendLeadSearchItem[];
+};
+
+type BackendDrawHistoryResponse = Partial<DrawResponse> & {
+  drawn?: boolean;
+  awardedRank?: number | null;
+};
+
+function apiBaseUrl() {
+  return (
+    process.env.NEXT_PUBLIC_API_BASE_URL ??
+    process.env.NEXT_PUBLIC_API_BASE ??
+    ""
+  ).replace(/\/+$/, "");
+}
+
+function normalizeLeadSearchResponse(response: BackendLeadSearchResponse): LeadSearchResponse {
+  return {
+    ...response,
+    results: response.results.map((lead) => {
+      const { ai, aiStatus, grade, score, ...rest } = lead;
+      return {
+        ...rest,
+        aiStatus: aiStatus ?? ai?.status ?? "PENDING",
+        grade: grade ?? ai?.grade ?? null,
+        score: score ?? ai?.score ?? null,
+      };
+    }),
+  };
+}
+
+function normalizeDrawResponse(response: DrawResponse): DrawResponse {
+  return {
+    ...response,
+    outOfStock: response.outOfStock ?? (response.rank === null),
+  };
+}
+
+function normalizeDrawHistoryResponse(response: BackendDrawHistoryResponse): DrawResponse {
+  if (response.drawn === false) {
+    throw new DrawApiError(404, {
+      code: "NOT_FOUND",
+      message: "추첨 이력을 찾을 수 없습니다.",
+    });
+  }
+
+  const rank = response.rank ?? response.awardedRank ?? null;
+  return normalizeDrawResponse({
+    rank,
+    prizeName: response.prizeName ?? null,
+    outOfStock: response.outOfStock ?? (rank === null),
+    drawnAt: response.drawnAt ?? "",
+    drawnBy: response.drawnBy ?? null,
+  });
 }

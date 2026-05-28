@@ -21,7 +21,7 @@ npm run dev -- -p 4173
 
 `frontend/vercel.json`에도 동일한 설정을 명시해두었습니다.
 
-배포 환경에서는 `API_BASE_URL` 값을 읽어 `/api/*` 요청을 백엔드 API 서버로 rewrite합니다.
+배포 환경에서는 `API_BASE_URL` 값을 읽어 브라우저의 API 호출 base URL로 사용합니다.
 Vercel에서는 Project Settings > Environment Variables에 `API_BASE_URL`을 추가하고 값을 `http://<API_SERVER_IP>:8080` 형식으로 넣습니다.
 로컬 확인이 필요하면 gitignore 대상인 `frontend/.env.local`에 같은 값을 넣습니다.
 

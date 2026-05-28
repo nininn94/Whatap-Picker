@@ -40,20 +40,22 @@ function eventsResponse() {
 
 function renderAppWithEventCode(path = "/?eventCode=event-1", prizes: unknown[] = []) {
   window.history.pushState({}, "", path);
+  const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const parsedUrl = new URL(url, window.location.origin);
+    if (parsedUrl.pathname === "/api/admin/events") {
+      return Promise.resolve(eventsResponse());
+    }
+
+    const eventCode = parsedUrl.searchParams.get("eventCode") || "event-1";
+    return Promise.resolve(inventoryResponse(eventCode, prizes));
+  });
   vi.stubGlobal(
     "fetch",
-    vi.fn((input: RequestInfo | URL) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-      const parsedUrl = new URL(url, window.location.origin);
-      if (parsedUrl.pathname === "/api/admin/events") {
-        return Promise.resolve(eventsResponse());
-      }
-
-      const eventCode = parsedUrl.searchParams.get("eventCode") || "event-1";
-      return Promise.resolve(inventoryResponse(eventCode, prizes));
-    }),
+    fetchMock,
   );
   render(<App />);
+  return fetchMock;
 }
 
 describe("App participant form", () => {
@@ -157,9 +159,17 @@ describe("App participant form", () => {
   });
 
   it("reads event code from event path URLs", async () => {
-    renderAppWithEventCode("/event/event-1");
+    const fetchMock = renderAppWithEventCode("/event/event-1");
 
-    expect(await screen.findByText("event-1")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([input]) => {
+          const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+          const parsedUrl = new URL(url, window.location.origin);
+          return parsedUrl.pathname === "/api/prizes" && parsedUrl.searchParams.get("eventCode") === "event-1";
+        }),
+      ).toBe(true);
+    });
     expect(screen.queryByText("행사를 먼저 선택해주세요.")).not.toBeInTheDocument();
   });
 });

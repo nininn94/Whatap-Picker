@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   drawPrize,
   fetchAdminEvents,
+  fetchDrawHistory,
   fetchPrizeInventory,
   searchLeads,
 } from "./draw-api";
@@ -16,6 +17,7 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
 describe("draw-api", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("fetches prize inventory with the event code query", async () => {
@@ -32,6 +34,25 @@ describe("draw-api", () => {
 
     expect(response.eventCode).toBe("event-1");
     expect(fetchMock).toHaveBeenCalledWith("/api/prizes?eventCode=event-1", {
+      credentials: "include",
+      headers: {},
+    });
+  });
+
+  it("uses the configured public API base URL", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "https://api.example.com/");
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        eventCode: "event-1",
+        eventDate: "2026-05-28",
+        prizes: [],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchPrizeInventory("event-1");
+
+    expect(fetchMock).toHaveBeenCalledWith("https://api.example.com/api/prizes?eventCode=event-1", {
       credentials: "include",
       headers: {},
     });
@@ -79,6 +100,63 @@ describe("draw-api", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/admin/events", {
       credentials: "include",
       headers: {},
+    });
+  });
+
+  it("normalizes backend lead search AI payloads", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        eventCode: "event-1",
+        eventDate: "2026-05-28",
+        results: [
+          {
+            leadId: "lead-1",
+            name: "홍길동",
+            jobFunction: "DEVELOPER",
+            jobLevel: "STAFF",
+            company: "와탭랩스",
+            drawn: false,
+            drawnAt: null,
+            ai: {
+              status: "DONE",
+              grade: "B",
+              score: 68,
+            },
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await searchLeads({ name: "홍길동", phoneLast4: "1234", eventCode: "event-1" });
+
+    expect(response.results[0]).toMatchObject({
+      aiStatus: "DONE",
+      grade: "B",
+      score: 68,
+    });
+  });
+
+  it("normalizes backend draw history payloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          drawn: true,
+          drawnAt: "2026-05-28T12:00:00Z",
+          awardedRank: 3,
+          prizeId: "prize-1",
+        }),
+      ),
+    );
+
+    const response = await fetchDrawHistory({ leadId: "lead-1", eventCode: "event-1" });
+
+    expect(response).toMatchObject({
+      rank: 3,
+      prizeName: null,
+      outOfStock: false,
+      drawnAt: "2026-05-28T12:00:00Z",
     });
   });
 
