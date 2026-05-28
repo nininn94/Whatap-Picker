@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Phone, RotateCcw, UserRound } from "lucide-react";
+import { ArrowRight, CheckCircle2, Phone, RotateCcw, UserRound } from "lucide-react";
 import {
   PICK_REVEAL_DURATION_MS,
   PickerCanvas,
@@ -24,13 +24,24 @@ import {
   type LeadSearchItem,
 } from "@/lib/draw-api";
 
-const STORAGE_KEY = "whatap-picker-display-v8";
+type BoardPattern = "scatter" | "rising" | "spike";
+
+const STORAGE_KEY = "whatap-picker-display-v9";
+const EVENT_CODE_STORAGE_KEY = "whatap-picker-selected-event-code";
+const EVENT_CODE_OPTIONS_STORAGE_KEY = "whatap-picker-event-codes";
 const BOARD_COLUMNS = 50;
 const BOARD_ROWS = 10;
 const BOARD_CELL_COUNT = BOARD_COLUMNS * BOARD_ROWS;
+const MAX_EVENT_CODE_OPTIONS = 8;
 const TEST_PARTICIPANT_NAME = "whatap";
 const TEST_PARTICIPANT_PHONE_LAST_FOUR = "1111";
 const RESULT_HOLD_DURATION_MS = 1500;
+const DEFAULT_BOARD_PATTERN: BoardPattern = "scatter";
+const BOARD_PATTERN_OPTIONS: { id: BoardPattern; label: string; description: string }[] = [
+  { id: "scatter", label: "분산형", description: "전역 산포" },
+  { id: "rising", label: "상승형", description: "계단 상승" },
+  { id: "spike", label: "스파이크형", description: "중앙 집중" },
+];
 
 type Prize = {
   rank: string;
@@ -51,6 +62,7 @@ type PickResult = {
 
 type PickerState = {
   eventTitle: string;
+  pattern: BoardPattern;
   prizes: Prize[];
   cells: PickerCell[];
   results: PickResult[];
@@ -88,18 +100,28 @@ const defaultPrizes: Prize[] = [
   { rank: "5등", name: "참가 기념품", count: 200 },
 ];
 
-function createDefaultState(): PickerState {
+const mockTestPrizes: Prize[] = defaultPrizes.map((prize) => ({
+  ...prize,
+  name: `Mock ${prize.name}`,
+}));
+
+function createDefaultState(pattern: BoardPattern = DEFAULT_BOARD_PATTERN): PickerState {
   return {
     eventTitle: "Whatap 경품 뽑기",
+    pattern,
     prizes: defaultPrizes,
-    cells: buildCells(defaultPrizes),
+    cells: buildCells(defaultPrizes, pattern),
     results: [],
   };
 }
 
 export default function App() {
   const [state, setState] = useState<PickerState>(() => loadState());
+  const [selectedPattern, setSelectedPattern] = useState<BoardPattern>(() => state.pattern);
   const [eventCode, setEventCode] = useState("");
+  const [eventCodeDraft, setEventCodeDraft] = useState("");
+  const [eventCodeOptions, setEventCodeOptions] = useState<string[]>([]);
+  const [selectedEventDate, setSelectedEventDate] = useState("");
   const [prizeInventory, setPrizeInventory] = useState<ApiPrize[]>([]);
   const [isLoadingPrizes, setIsLoadingPrizes] = useState(false);
   const [prizeError, setPrizeError] = useState("");
@@ -124,7 +146,13 @@ export default function App() {
 
   useEffect(() => {
     const timerId = window.setTimeout(() => {
-      setEventCode(readEventCode());
+      const nextEventCode = readEventCode();
+      setEventCode(nextEventCode);
+      setEventCodeDraft(nextEventCode);
+      setEventCodeOptions(readEventCodeOptions(nextEventCode));
+      if (nextEventCode) {
+        setEventCodeOptions(rememberEventCode(nextEventCode));
+      }
     }, 0);
 
     return () => window.clearTimeout(timerId);
@@ -137,8 +165,15 @@ export default function App() {
     try {
       const response = await fetchPrizeInventory(nextEventCode);
       setPrizeInventory(response.prizes);
+      setSelectedEventDate(response.eventDate);
+      setParticipant((current) =>
+        current && current.eventCode === response.eventCode
+          ? { ...current, eventDate: response.eventDate }
+          : current,
+      );
     } catch (error) {
       setPrizeInventory([]);
+      setSelectedEventDate("");
       setPrizeError(apiErrorMessage(error, "경품 재고를 불러오지 못했습니다."));
     } finally {
       setIsLoadingPrizes(false);
@@ -180,16 +215,16 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
   }
 
-  function resetPickedState() {
+  function resetPickedState(pattern: BoardPattern = selectedPattern) {
     clearRevealTimer();
     if (resultTimerRef.current !== null) {
       window.clearTimeout(resultTimerRef.current);
       resultTimerRef.current = null;
     }
 
-    const nextState = createDefaultState();
-    setState(nextState);
-    localStorage.removeItem(STORAGE_KEY);
+    const nextState = createDefaultState(pattern);
+    setSelectedPattern(pattern);
+    updateState(nextState);
     setDrawError("");
     setSelectedResult(null);
     setActivePickKey(null);
@@ -210,25 +245,13 @@ export default function App() {
       return;
     }
 
-    if (!eventCode) {
-      setParticipantError("URL에 eventCode 파라미터가 필요합니다.");
+    if (isMockTestParticipant(nextParticipant)) {
+      openManagementPage(nextParticipant);
       return;
     }
 
-    if (isMockTestParticipant(nextParticipant)) {
-      setIsTestMode(true);
-      setParticipant({
-        leadId: "mock-lead-whatap-1111",
-        name: participantFormFullName(nextParticipant),
-        phoneLastFour: nextParticipant.phoneLastFour,
-        eventCode,
-        eventDate: todayDateString(),
-        company: "Mock Company",
-        jobLevel: "MOCK",
-        aiStatus: "DONE",
-        grade: "A",
-        score: 100,
-      });
+    if (!eventCode) {
+      setParticipantError("URL에 eventCode 파라미터가 필요합니다.");
       return;
     }
 
@@ -278,6 +301,52 @@ export default function App() {
     if (leadOptions.length > 0) {
       setLeadOptions([]);
     }
+  }
+
+  function openManagementPage(nextParticipant: ParticipantForm) {
+    setIsTestMode(true);
+    setParticipant({
+      leadId: "mock-lead-whatap-1111",
+      name: participantFormFullName(nextParticipant),
+      phoneLastFour: nextParticipant.phoneLastFour,
+      eventCode,
+      eventDate: selectedEventDate || todayDateString(),
+      company: "Mock Company",
+      jobLevel: "MOCK",
+      aiStatus: "DONE",
+      grade: "A",
+      score: 100,
+    });
+    setParticipantError("");
+    setLeadOptions([]);
+    setDrawError("");
+  }
+
+  function submitEventSelection(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    applyEventCode(eventCodeDraft);
+  }
+
+  function applyEventCode(value: string) {
+    const nextEventCode = value.trim();
+    if (!nextEventCode) {
+      setPrizeError("이벤트 코드를 입력해주세요.");
+      return;
+    }
+
+    setEventCode(nextEventCode);
+    setEventCodeDraft(nextEventCode);
+    setEventCodeOptions(rememberEventCode(nextEventCode));
+    updateEventCodeInUrl(nextEventCode);
+    setPrizeInventory([]);
+    setSelectedEventDate("");
+    setPrizeError("");
+    setParticipantError("");
+    setDrawError("");
+    setParticipant((current) =>
+      current ? { ...current, eventCode: nextEventCode, eventDate: undefined } : current,
+    );
+    resetPickedState(selectedPattern);
   }
 
   async function selectLeadOption(lead: LeadOption) {
@@ -363,25 +432,32 @@ export default function App() {
     }
   }
 
-  function pickMockCell(index: number, currentParticipant: Participant) {
+  function pickMockCell(index: number, currentParticipant: Participant, prizeOverride?: Prize) {
     const cell = state.cells[index];
     if (!cell || cell.picked || isRevealing) return;
 
     const result: PickResult = {
-      id: `${cell.id}-mock-${Date.now()}`,
+      id: `${cell.id}-mock`,
       cellNumber: index + 1,
-      rank: cell.rank,
-      name: cell.name,
+      rank: prizeOverride?.rank ?? cell.rank,
+      name: prizeOverride?.name ?? cell.name,
       pickedAt: new Date().toLocaleString("ko-KR"),
       participantName: participantFullName(currentParticipant),
       participantPhoneLastFour: currentParticipant.phoneLastFour,
       isMock: true,
     };
     const nextCells = state.cells.map((item, cellIndex) =>
-      cellIndex === index ? { ...item, picked: true } : item,
+      cellIndex === index
+        ? {
+            ...item,
+            picked: true,
+            rank: result.rank,
+            name: result.name,
+          }
+        : item,
     );
 
-    setActivePickKey(result.id);
+    setActivePickKey(cell.id);
     setIsRevealing(true);
     clearRevealTimer();
 
@@ -398,6 +474,26 @@ export default function App() {
     }, PICK_REVEAL_DURATION_MS);
   }
 
+  function selectMockPrize(prize: Prize) {
+    if (!participant || isRevealing) return;
+
+    const candidates = state.cells
+      .map((cell, index) => ({ cell, index }))
+      .filter(({ cell }) => !cell.picked && cell.tone !== "white");
+    const fallbackCandidates = state.cells
+      .map((cell, index) => ({ cell, index }))
+      .filter(({ cell }) => !cell.picked);
+    const pickableCells = candidates.length > 0 ? candidates : fallbackCandidates;
+
+    if (pickableCells.length === 0) {
+      setDrawError("선택 가능한 칸이 없습니다. 뽑기판을 초기화해 주세요.");
+      return;
+    }
+
+    const nextIndex = pickableCells[0].index;
+    pickMockCell(nextIndex, participant, prize);
+  }
+
   async function pickCell(index: number) {
     const cell = state.cells[index];
     if (!cell || cell.picked || isRevealing || !participant) return;
@@ -407,7 +503,7 @@ export default function App() {
       return;
     }
 
-    if (!participant.leadId || !participant.eventDate || !participant.eventCode) {
+    if (!participant.leadId || !participant.eventCode) {
       setDrawError("참여자 정보가 올바르지 않습니다. 다시 검색해 주세요.");
       return;
     }
@@ -481,6 +577,19 @@ export default function App() {
   }
 
   const prizeStatus = prizeInventoryStatus(prizeInventory, isLoadingPrizes, prizeError);
+  const selectedEventStatus = eventStatusLabel({
+    eventCode,
+    eventDate: selectedEventDate,
+    prizeStatus,
+    isLoading: isLoadingPrizes,
+    error: prizeError,
+  });
+  const isManagementPatternEntered = isMockTestParticipant({
+    lastName: participantForm.lastName.trim(),
+    firstName: participantForm.firstName.trim(),
+    phoneLastFour: digitsOnly(participantForm.phoneLastFour).slice(0, 4),
+  });
+  const canSubmitParticipant = !isCheckingParticipant && (Boolean(eventCode) || isManagementPatternEntered);
 
   const resultOverlay = selectedResult ? (
     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center">
@@ -526,7 +635,7 @@ export default function App() {
             className="h-[48px] w-auto object-contain"
           />
           <div className="flex w-[180px] justify-end">
-            <Button type="button" variant="outline" size="sm" className="gap-2" onClick={resetPickedState}>
+            <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => resetPickedState()}>
               <RotateCcw className="size-3.5" aria-hidden="true" />
               초기화
             </Button>
@@ -610,7 +719,7 @@ export default function App() {
             {participantError ? (
               <p className="mt-4 text-sm font-medium text-destructive">{participantError}</p>
             ) : null}
-            {!eventCode ? (
+            {!eventCode && !isManagementPatternEntered ? (
               <p className="mt-4 text-sm font-medium text-destructive">
                 URL에 eventCode 파라미터가 필요합니다.
               </p>
@@ -640,7 +749,7 @@ export default function App() {
               </div>
             ) : null}
 
-            <Button type="submit" className="mt-6 h-12 w-full gap-2 text-base" disabled={isCheckingParticipant || !eventCode}>
+            <Button type="submit" className="mt-6 h-12 w-full gap-2 text-base" disabled={!canSubmitParticipant}>
               {isCheckingParticipant ? "확인 중" : "이벤트 참여하기"}
               <ArrowRight className="size-4" aria-hidden="true" />
             </Button>
@@ -650,11 +759,152 @@ export default function App() {
     );
   }
 
+  if (isTestMode) {
+    return (
+      <main className="flex h-screen min-h-screen flex-col overflow-hidden bg-background px-5 pb-5 pt-4">
+        <header className="flex h-[92px] shrink-0 items-center justify-between gap-4">
+          <div className="flex w-[180px] justify-start">
+            <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => resetPickedState(selectedPattern)}>
+              <RotateCcw className="size-3.5" aria-hidden="true" />
+              초기화
+            </Button>
+          </div>
+          <img
+            src="/WhaTap_basic_logo.png"
+            alt="WhaTap"
+            className="h-[48px] w-auto object-contain"
+          />
+          <div className="flex w-[180px] justify-end">
+            <Badge variant="secondary" className="max-w-full truncate px-3 py-1 text-sm">
+              관리 모드
+            </Badge>
+          </div>
+        </header>
+
+        <section className="flex min-h-0 flex-1 flex-col gap-4">
+          <div className="min-h-0 flex-1 rounded-lg border bg-card p-4 shadow-sm">
+            <div className="relative h-full w-full overflow-hidden rounded-md">
+              <PickerCanvas
+                cells={state.cells}
+                columns={BOARD_COLUMNS}
+                rows={BOARD_ROWS}
+                activePickKey={activePickKey}
+                isRevealing={isRevealing}
+                onPick={() => undefined}
+              />
+              {drawError ? (
+                <div className="absolute left-4 top-4 z-20 max-w-[420px] rounded-md border border-destructive/30 bg-background/95 px-4 py-2 text-sm font-medium text-destructive shadow-sm">
+                  {drawError}
+                </div>
+              ) : null}
+              {drawEffect}
+              {resultOverlay}
+              <Confetti key={confettiTrigger} active={confettiTrigger > 0} />
+            </div>
+          </div>
+
+          <div className="shrink-0 rounded-lg border bg-card p-4 shadow-sm">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <Badge className="mb-2 px-3 py-1 text-sm">뽑기판 관리</Badge>
+                <h1 className="text-xl font-bold tracking-normal text-foreground">이벤트 및 테스트 관리</h1>
+                <p className="mt-1 text-sm font-medium text-muted-foreground">
+                  현재 선택된 이벤트: {selectedEventStatus}
+                </p>
+              </div>
+              <Button type="button" variant="ghost" onClick={finishCycle}>
+                입력 폼으로 돌아가기
+              </Button>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr_1.4fr]">
+              <div>
+                <div className="mb-2 text-sm font-semibold text-foreground">이벤트 선택</div>
+                <form className="space-y-2" onSubmit={submitEventSelection}>
+                  {eventCodeOptions.length > 0 ? (
+                    <select
+                      aria-label="최근 이벤트 선택"
+                      value={eventCodeOptions.includes(eventCodeDraft) ? eventCodeDraft : ""}
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm font-medium"
+                      disabled={isRevealing}
+                      onChange={(event) => setEventCodeDraft(event.target.value)}
+                    >
+                      <option value="" disabled>
+                        최근 이벤트
+                      </option>
+                      {eventCodeOptions.map((code) => (
+                        <option key={code} value={code}>
+                          {code}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
+                  <Input
+                    aria-label="이벤트 코드"
+                    value={eventCodeDraft}
+                    onChange={(event) => setEventCodeDraft(event.target.value)}
+                    placeholder="event-code"
+                    className="h-10 text-sm"
+                    disabled={isRevealing}
+                  />
+                  <Button type="submit" className="h-10 w-full" disabled={isRevealing || !eventCodeDraft.trim()}>
+                    이벤트 적용
+                  </Button>
+                </form>
+              </div>
+
+              <div>
+                <div className="mb-2 text-sm font-semibold text-foreground">패턴 선택</div>
+                <div className="grid grid-cols-3 gap-2 lg:grid-cols-1">
+                  {BOARD_PATTERN_OPTIONS.map((option) => (
+                    <Button
+                      key={option.id}
+                      type="button"
+                      variant={selectedPattern === option.id ? "default" : "outline"}
+                      className="h-12 justify-between gap-2 px-3 text-left"
+                      disabled={isRevealing}
+                      onClick={() => resetPickedState(option.id)}
+                    >
+                      <span className="font-bold">{option.label}</span>
+                      <span className="text-xs font-medium opacity-80">{option.description}</span>
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 text-sm font-semibold text-foreground">등수 선택</div>
+                <div className="grid grid-cols-5 gap-2">
+                  {mockTestPrizes.map((prize) => (
+                    <Button
+                      key={prize.rank}
+                      type="button"
+                      variant="outline"
+                      className="h-20 flex-col gap-1 px-2 text-center"
+                      disabled={isRevealing}
+                      onClick={() => selectMockPrize(prize)}
+                    >
+                      <CheckCircle2 className="size-4 text-primary" aria-hidden="true" />
+                      <span className="text-lg font-bold">{prize.rank}</span>
+                      <span className="max-w-full truncate text-xs font-medium text-muted-foreground">
+                        {prize.name}
+                      </span>
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="flex h-screen min-h-screen flex-col overflow-hidden bg-background px-5 pb-5 pt-4">
       <header className="flex h-[92px] shrink-0 items-center justify-between gap-4">
         <div className="flex w-[180px] items-center justify-start gap-2">
-          <Button type="button" variant="outline" size="sm" className="gap-2" onClick={resetPickedState}>
+          <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => resetPickedState()}>
             <RotateCcw className="size-3.5" aria-hidden="true" />
             초기화
           </Button>
@@ -753,6 +1003,34 @@ function prizeInventoryStatus(prizes: ApiPrize[], isLoading: boolean, error: str
   return `잔여 ${remaining}/${initial}`;
 }
 
+function eventStatusLabel({
+  eventCode,
+  eventDate,
+  prizeStatus,
+  isLoading,
+  error,
+}: {
+  eventCode: string;
+  eventDate: string;
+  prizeStatus: string;
+  isLoading: boolean;
+  error: string;
+}) {
+  if (!eventCode) return "미선택";
+
+  const parts = [eventCode];
+  if (eventDate) {
+    parts.push(eventDate);
+  }
+  if (prizeStatus) {
+    parts.push(prizeStatus);
+  } else if (!isLoading && !error && eventDate) {
+    parts.push("등록된 재고 없음");
+  }
+
+  return parts.join(" · ");
+}
+
 function apiErrorMessage(error: unknown, fallback: string) {
   if (error instanceof DrawApiError) {
     return error.message;
@@ -773,7 +1051,72 @@ function formatDateTime(value: string) {
 
 function readEventCode() {
   if (typeof window === "undefined") return "";
-  return new URLSearchParams(window.location.search).get("eventCode")?.trim() || "";
+
+  const queryEventCode = new URLSearchParams(window.location.search).get("eventCode")?.trim();
+  if (queryEventCode) return queryEventCode;
+
+  const pathSegments = window.location.pathname.split("/").filter(Boolean);
+  const eventSegmentIndex = pathSegments.indexOf("event");
+  const pathEventCode = eventSegmentIndex >= 0 ? pathSegments[eventSegmentIndex + 1] : "";
+  if (pathEventCode) return decodeEventCode(pathEventCode);
+
+  return localStorage.getItem(EVENT_CODE_STORAGE_KEY)?.trim() || "";
+}
+
+function decodeEventCode(value: string) {
+  try {
+    return decodeURIComponent(value).trim();
+  } catch {
+    return value.trim();
+  }
+}
+
+function readEventCodeOptions(currentEventCode = "") {
+  if (typeof window === "undefined") return currentEventCode ? [currentEventCode] : [];
+
+  const options = parseEventCodeOptions(localStorage.getItem(EVENT_CODE_OPTIONS_STORAGE_KEY));
+  if (!currentEventCode) return options;
+
+  return uniqueEventCodes([currentEventCode, ...options]);
+}
+
+function rememberEventCode(eventCode: string) {
+  const nextOptions = uniqueEventCodes([eventCode, ...readEventCodeOptions()]).slice(0, MAX_EVENT_CODE_OPTIONS);
+  localStorage.setItem(EVENT_CODE_STORAGE_KEY, eventCode);
+  localStorage.setItem(EVENT_CODE_OPTIONS_STORAGE_KEY, JSON.stringify(nextOptions));
+  return nextOptions;
+}
+
+function parseEventCodeOptions(value: string | null) {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+
+    return uniqueEventCodes(parsed.map((item) => String(item)));
+  } catch {
+    return [];
+  }
+}
+
+function uniqueEventCodes(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function updateEventCodeInUrl(eventCode: string) {
+  if (typeof window === "undefined") return;
+
+  const url = new URL(window.location.href);
+  const pathSegments = url.pathname.split("/").filter(Boolean);
+  if (pathSegments[0] === "event") {
+    url.pathname = `/event/${encodeURIComponent(eventCode)}`;
+    url.searchParams.delete("eventCode");
+  } else {
+    url.searchParams.set("eventCode", eventCode);
+  }
+
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 function todayDateString() {
@@ -793,6 +1136,7 @@ function loadState(): PickerState {
 
   try {
     const parsed = JSON.parse(saved) as PickerState;
+    const pattern = normalizeBoardPattern(parsed.pattern);
     const prizes = normalizePrizes(parsed.prizes);
     if (prizeTotalOf(prizes) !== BOARD_CELL_COUNT || parsed.cells?.length !== BOARD_CELL_COUNT) {
       return fallbackState;
@@ -800,6 +1144,7 @@ function loadState(): PickerState {
 
     return {
       eventTitle: parsed.eventTitle || fallbackState.eventTitle,
+      pattern,
       prizes,
       cells: parsed.cells,
       results: Array.isArray(parsed.results) ? parsed.results : [],
@@ -807,6 +1152,12 @@ function loadState(): PickerState {
   } catch {
     return fallbackState;
   }
+}
+
+function normalizeBoardPattern(pattern: unknown): BoardPattern {
+  return pattern === "rising" || pattern === "spike" || pattern === "scatter"
+    ? pattern
+    : DEFAULT_BOARD_PATTERN;
 }
 
 function normalizePrizes(prizes: Prize[]) {
@@ -828,7 +1179,7 @@ function prizeTotalOf(prizes: Prize[]) {
   return prizes.reduce((sum, prize) => sum + safeCount(prize.count), 0);
 }
 
-function buildCells(prizes: Prize[]): PickerCell[] {
+function buildCells(prizes: Prize[], pattern: BoardPattern): PickerCell[] {
   const normalizedPrizes = normalizePrizes(prizes);
   const pool = normalizedPrizes.flatMap((prize, prizeIndex) =>
     Array.from({ length: prize.count }, () => ({
@@ -837,7 +1188,7 @@ function buildCells(prizes: Prize[]): PickerCell[] {
       name: prize.name,
     })),
   );
-  const tones = buildTonePattern();
+  const tones = buildTonePattern(pattern);
 
   return shuffle(pool).slice(0, BOARD_CELL_COUNT).map((prize, index) => ({
     id: `cell-${index}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -847,40 +1198,82 @@ function buildCells(prizes: Prize[]): PickerCell[] {
   }));
 }
 
-function buildTonePattern(): CellTone[] {
-  const columnHeights = Array.from({ length: BOARD_COLUMNS }, (_, column) => {
-    const wave = Math.sin(column * 0.41) * 1.25 + Math.cos(column * 0.23) * 0.95;
-    const spike =
-      spikeWeight(column, 3) * 3.8 +
-      spikeWeight(column, 18) * 2.7 +
-      spikeWeight(column, 39) * 3.5 +
-      spikeWeight(column, 45) * 2.8;
-    const jitter = Math.random() * 1.8;
-    return Math.max(3, Math.min(BOARD_ROWS, Math.round(4.4 + wave + spike + jitter)));
-  });
-
+function buildTonePattern(pattern: BoardPattern): CellTone[] {
   return Array.from({ length: BOARD_CELL_COUNT }, (_, index) => {
     const column = index % BOARD_COLUMNS;
     const row = Math.floor(index / BOARD_COLUMNS);
     const rowFromBottom = BOARD_ROWS - 1 - row;
-    const height = columnHeights[column];
 
-    if (rowFromBottom >= height) {
-      if (rowFromBottom === height && Math.random() < 0.14) return Math.random() < 0.72 ? "blue" : "yellow";
-      if (rowFromBottom >= BOARD_ROWS - 2 && Math.random() < 0.018) return "blue";
-      return "white";
+    if (pattern === "rising") {
+      return risingTone(column, rowFromBottom);
     }
 
-    if (rowFromBottom > 1 && Math.random() < 0.08) return "white";
-    if (rowFromBottom === 0) return Math.random() < 0.78 ? "red" : Math.random() < 0.62 ? "yellow" : "blue";
-    if (rowFromBottom === 1 && Math.random() < 0.16) return "red";
-    if (rowFromBottom <= 3) return Math.random() < 0.5 ? "yellow" : "blue";
-    return Math.random() < 0.78 ? "blue" : "yellow";
+    if (pattern === "spike") {
+      return spikeTone(column, rowFromBottom);
+    }
+
+    return scatterTone(row, rowFromBottom);
   });
 }
 
-function spikeWeight(column: number, center: number) {
-  return Math.max(0, 1 - Math.abs(column - center) / 3);
+function scatterTone(row: number, rowFromBottom: number): CellTone {
+  if (rowFromBottom === 0) {
+    return Math.random() < 0.9 ? "blue" : "yellow";
+  }
+
+  if (row === 0) {
+    return Math.random() < 0.7 ? (Math.random() < 0.64 ? "yellow" : "red") : "white";
+  }
+
+  const probability = rowFromBottom <= 2 ? 0.72 : rowFromBottom <= 5 ? 0.56 : 0.42;
+  if (Math.random() > probability) return "white";
+  return Math.random() < 0.58 ? "blue" : Math.random() < 0.86 ? "yellow" : "red";
+}
+
+function risingTone(column: number, rowFromBottom: number): CellTone {
+  if (rowFromBottom === 0) {
+    return Math.random() < 0.78 ? "blue" : Math.random() < 0.86 ? "red" : "yellow";
+  }
+
+  const ramp = clampPatternNumber((column - 16) / 17, 0, 1);
+  const shelf = column >= 32 ? (column < 42 ? 6 : 5) : 0;
+  const height = Math.max(2, Math.round(2 + ramp * 6), shelf);
+  const ridge = Math.abs(rowFromBottom - height) <= 1 && column >= 16;
+  const body = rowFromBottom < height && column >= 16 && Math.random() < 0.82;
+  const lowerFill = rowFromBottom <= Math.min(height, 4) && Math.random() < 0.76;
+  const outlier = Math.random() < 0.1;
+
+  if (!ridge && !body && !lowerFill && !outlier) return "white";
+  if (rowFromBottom <= 1 && Math.random() < 0.3) return "red";
+  if (ridge && column >= 33) return Math.random() < 0.68 ? "yellow" : "blue";
+  return Math.random() < 0.74 ? "blue" : "yellow";
+}
+
+function spikeTone(column: number, rowFromBottom: number): CellTone {
+  if (rowFromBottom === 0) {
+    return Math.random() < 0.86 ? "blue" : "yellow";
+  }
+
+  const center = 25.5;
+  const distance = Math.abs(column - center);
+  const spikeHeight = Math.max(0, Math.round(9.5 - distance * 0.7));
+  const shoulderHeight = Math.max(0, Math.round(5.8 - distance * 0.28));
+  const inSpike = spikeHeight > 0 && rowFromBottom <= spikeHeight;
+  const inShoulder = shoulderHeight > 0 && rowFromBottom <= shoulderHeight && Math.random() < 0.9;
+  const baseFill = rowFromBottom <= 3 && Math.random() < 0.58;
+  const outlier = Math.random() < (rowFromBottom <= 4 ? 0.15 : 0.08);
+
+  if (!inSpike && !inShoulder && !baseFill && !outlier) {
+    return "white";
+  }
+
+  if (distance <= 2.2 && rowFromBottom >= 2 && rowFromBottom <= 6) return "red";
+  if (distance <= 7 && rowFromBottom <= spikeHeight) return Math.random() < 0.82 ? "yellow" : "blue";
+  return Math.random() < 0.62 ? "blue" : "yellow";
+}
+
+function clampPatternNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function shuffle<T>(items: T[]) {

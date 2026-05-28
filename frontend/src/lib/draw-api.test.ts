@@ -44,11 +44,11 @@ describe("draw-api", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await drawPrize({ leadId: "lead-1", eventDate: "2026-05-28" });
+    await drawPrize({ leadId: "lead-1", eventCode: "event-1" });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/draw", {
       method: "POST",
-      body: JSON.stringify({ leadId: "lead-1", eventDate: "2026-05-28" }),
+      body: JSON.stringify({ leadId: "lead-1", eventCode: "event-1" }),
       headers: { "Content-Type": "application/json" },
     });
   });
