@@ -280,7 +280,7 @@ export default function App() {
 
   const resultOverlay = selectedResult ? (
     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6">
-      <div className="select-none rounded-2xl bg-blue-600 px-10 py-7 text-center shadow-2xl">
+      <div className="select-none rounded-2xl px-10 py-7 text-center shadow-2xl" style={{ backgroundColor: "#35a4ff" }}>
         <div className="text-[96px] font-black leading-none text-white sm:text-[132px]">
           {selectedResult.rank}
         </div>
