@@ -935,10 +935,6 @@ export default function App() {
     <main className="flex h-screen min-h-screen flex-col overflow-hidden bg-background px-5 pb-5 pt-4">
       <header className="flex h-[92px] shrink-0 items-center justify-between gap-4">
         <div className="flex w-[180px] items-center justify-start gap-2">
-          <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => resetPickedState()}>
-            <RotateCcw className="size-3.5" aria-hidden="true" />
-            초기화
-          </Button>
           {prizeStatus ? (
             <Badge variant="outline" className="max-w-full truncate px-3 py-1 text-sm">
               {prizeStatus}
