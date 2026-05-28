@@ -38,7 +38,8 @@
 
 **제외된 것**
 - Ollama 컨테이너 — t3.micro RAM 1GB로는 qwen2.5:1.5b(3GB 요구) 구동 불가.
-  AI 리드 등급은 시드 룰 8개로 약 80~85% 커버, LLM 폴백 호출은 실패 → `LeadScore.ai_status=FAILED`로 기록되어 어드민 화면에서 재시도 가능.
+  현재 Lifecycle Stage 분류는 deterministic 룰(MQL/KNOWN_LEAD 2단계)만으로 100% 처리하므로 LLM 호출 0회.
+  LLM 은 `MarketingInsightService` (대시보드/리드 페이지의 마케팅 인사이트 생성) 에서만 사용 — Ollama 실패 시 Anthropic 폴백, 둘 다 실패면 인사이트 생성만 실패하고 본 기능에는 영향 없음.
   추후 EC2 사양 업그레이드 시 `docker-compose.prod.yml`에 Ollama 서비스 추가하고 `SPRING_AI_OLLAMA_INIT_PULL_MODEL_STRATEGY=when_missing`으로 전환하면 됩니다.
 
 ---

@@ -1,6 +1,7 @@
 # 운영용 compose — EC2(t3.micro)에서 사용. GHA가 배포 시 자동으로 ${...} 값을 채운 .env를 같이 둠.
 # 로컬 개발은 기존 docker-compose.yml을 사용 (Ollama 포함).
-# t3.micro RAM 1GB 제약으로 Ollama는 EC2에서 제외 — AI 룰 8개로 80~85% 커버, LLM 폴백 호출은 실패 시 FAILED 처리.
+# t3.micro RAM 1GB 제약으로 Ollama는 EC2에서 제외 — Lifecycle Stage 분류는 deterministic 룰만 사용(LLM 호출 0회).
+# LLM 은 마케팅 인사이트 생성에서만 사용(Ollama 실패 시 Anthropic 폴백).
 
 services:
   postgres:
