@@ -90,9 +90,19 @@ public class LeadScoringPipeline {
         }
     }
 
+    /**
+     * 배치 재분석용 — 재시도 백오프 없음. 한 번 시도하고 실패 시 즉시 예외 전파.
+     * UI 의 rescore 버튼처럼 N건을 동기 처리할 때 호출. @Retryable 의 30s/300s 지연으로
+     * 전체 batch 가 수십 분 막히는 것을 방지.
+     */
+    @Transactional
+    public LeadScore scoreOnce(UUID leadId) { return doScore(leadId); }
+
     @Retryable(maxAttempts = 3, backoff = @Backoff(delay = 30_000, multiplier = 10))
     @Transactional
-    public LeadScore score(UUID leadId) {
+    public LeadScore score(UUID leadId) { return doScore(leadId); }
+
+    private LeadScore doScore(UUID leadId) {
         Lead lead = leadRepository.findById(leadId).orElse(null);
         if (lead == null) return null;
 

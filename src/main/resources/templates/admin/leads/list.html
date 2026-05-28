@@ -430,10 +430,14 @@
         try {
             const r = await adminApi.post('/api/admin/leads/rescore', { eventCode: ec || null, all: true });
             const d = r.distribution || {};
-            const msg = r.totalLeads === 0
-                ? `대상 리드가 0건입니다. (${scope})`
-                : `재분석 ${r.queued}/${r.candidates}건 · 실패 ${r.failed ?? 0} — MQL ${d.MQL ?? 0} · Known ${d.KNOWN_LEAD ?? 0} · 기타 ${d.PENDING_OR_OTHER ?? 0}`;
-            toast(msg);
+            if (r.totalLeads === 0) {
+                toast(`대상 리드가 0건입니다. (${scope})`);
+            } else if (r.failed > 0) {
+                console.warn('rescore errors:', r.errorSamples);
+                toast(`재분석 ${r.queued}/${r.candidates}건 · 실패 ${r.failed}건 — ${r.firstError || '원인 미상'}`, true);
+            } else {
+                toast(`재분석 완료 ${r.queued}건 — MQL ${d.MQL ?? 0} · Known ${d.KNOWN_LEAD ?? 0} · 기타 ${d.PENDING_OR_OTHER ?? 0}`);
+            }
             await refreshAll();
         } catch (e) { toast(e.message, true); }
         finally { done(); }

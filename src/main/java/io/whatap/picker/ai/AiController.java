@@ -136,9 +136,20 @@ public class AiController {
                 req == null ? null : req.eventCode(), leadIds.size());
 
         long queued = 0; long failed = 0;
+        String firstError = null;
+        java.util.List<String> errorSamples = new java.util.ArrayList<>();
         for (UUID id : leadIds) {
-            try { pipeline.score(id); queued++; }
-            catch (Exception e) { failed++; log.warn("rescore failed leadId={}: {}", id, e.toString()); }
+            try { pipeline.scoreOnce(id); queued++; }
+            catch (Exception e) {
+                failed++;
+                // 원인 unwrap — @Retryable 등 AOP 가 감싸는 ExhaustedRetryException 의 root cause 가 더 유용.
+                Throwable root = e;
+                while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+                String msg = root.getClass().getSimpleName() + ": " + (root.getMessage() == null ? "" : root.getMessage());
+                if (firstError == null) firstError = msg;
+                if (errorSamples.size() < 3) errorSamples.add("leadId=" + id + " — " + msg);
+                log.warn("rescore failed leadId={}: {}", id, msg, e);
+            }
         }
 
         // 처리 후 Stage 분포 — UI 가 결과 검증할 수 있도록.
@@ -160,6 +171,8 @@ public class AiController {
         out.put("candidates", leadIds.size());
         out.put("totalLeads", leadCount);
         out.put("distribution", dist);
+        if (firstError != null) out.put("firstError", firstError);
+        if (!errorSamples.isEmpty()) out.put("errorSamples", errorSamples);
         return out;
     }
 
