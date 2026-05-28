@@ -7,6 +7,7 @@
 > - 경품 재고: 전부 유한, 어드민이 직접 설정 → 재고 소진 시 꽝 처리
 > - 이메일 정책: `jobFunction == STUDENT_FREELANCER`면 개인 메일 허용, 나머지 14종은 회사 메일 강제
 > - AI: 오픈소스 **Ollama** (Docker, CPU only), 모델 **`qwen2.5:1.5b`** (≈1GB, 한국어 분석 + JSON 모드 안정)
+> - **Spring Boot 4.x + Spring AI 1.x** — `ChatClient` + `BeanOutputConverter`로 구조화 출력(JSON 파싱 코드 0줄), `PromptTemplate` 변수 치환, Advisors로 로깅/메모리, Micrometer 자동 통합
 > - 운영자/어드민 로그인 필요, 초기 어드민은 앱 기동 시 자동 시드
 > - JWT 만료: 8시간
 > - 데이터 보존: 24개월 (수집일 기준), 만료 시 hard delete
@@ -58,19 +59,20 @@
 
 | 영역 | 선택 | 비고 |
 | --- | --- | --- |
-| 언어/프레임워크 | Java 17 + Spring Boot 3.x | 팀 내 Java 보유 |
+| 언어/프레임워크 | **Java 21 + Spring Boot 4.x** | Spring Framework 7, Jakarta EE 11, AOT 컴파일 개선 |
 | 빌드 | Gradle | Wrapper 포함 |
 | DB | **PostgreSQL 16 (Docker)** | `docker-compose up`으로 즉시 기동 |
-| ORM | Spring Data JPA | 마이그레이션은 Flyway |
-| 인증 | **Spring Security 6 + JWT** | 운영자/어드민 로그인 |
+| ORM | **Spring Data JPA + Hibernate 7** | 마이그레이션은 Flyway |
+| 인증 | **Spring Security 7 + JWT** | SB4 기본 동봉, 운영자/어드민 로그인 |
 | 비밀번호 해시 | BCrypt | Spring Security `PasswordEncoder` |
-| 검증 | Jakarta Bean Validation | `@NotBlank`, `@Pattern`, custom validator |
+| 검증 | Jakarta Bean Validation 3.1 | `@NotBlank`, `@Pattern`, custom validator |
 | **SSR 템플릿** | **Thymeleaf** | QR 표시·설문 폼·Thank you 페이지·어드민 폼 빌더 |
 | **클라이언트 보조** | HTMX + Alpine.js (CDN) | 분기 표시/숨김, 폼 단계 이동 — SPA 없이 가벼운 인터랙션 |
 | **QR 생성** | `com.google.zxing:core` + `zxing:javase` | PNG/SVG 출력 |
-| AI 연동 | **Ollama (Docker, CPU only)** | `http://ollama:11434/api/chat`, 모델 **`qwen2.5:1.5b`** (≈1GB, 한국어 + JSON 안정). GPU 미사용. 룰 선적용으로 LLM 호출 80%+ 차단 목표 |
+| **AI 프레임워크** | **Spring AI 1.x** (`spring-ai-starter-model-ollama`) | `ChatClient`, `BeanOutputConverter`, `PromptTemplate`, Advisors, Micrometer 자동 통합 |
+| AI 런타임 | **Ollama (Docker, CPU only)** | `http://ollama:11434`, 모델 **`qwen2.5:1.5b`** (≈1GB). GPU 미사용 |
 | 직렬화 | Jackson | LocalDate/LocalDateTime ISO-8601 |
-| 테스트 | JUnit 5 + Spring Boot Test + Testcontainers | Postgres 컨테이너로 통합 테스트 |
+| 테스트 | JUnit 5 + Spring Boot Test + Testcontainers | Postgres 컨테이너 + Ollama 통합 테스트 |
 | 문서화 | Springdoc OpenAPI (`/swagger-ui.html`) | 프론트엔드 협업용 |
 
 ---
@@ -706,12 +708,14 @@ LeadSubmittedEvent 발행
 │    - 결정적 룰 hit (grade + score 확정) → 종료(RULE)│
 │    - 일부 룰만 hit → LLM에 hint 전달 (HYBRID)        │
 │ 3. LLM 호출 (룰 결정 안 된 경우만 — 전체의 20%↓ 목표)│
-│    - Ollama /api/chat, format=json                  │
+│    - Spring AI `ChatClient.prompt(...).entity(LeadScoreResult.class)` │
+│    - 내부: OllamaChatModel → /api/chat              │
+│    - BeanOutputConverter가 JSON → Record 자동 매핑   │
 │    - 모델 qwen2.5:1.5b (CPU only, 응답 1~3s)         │
-│    - timeout 15s (CPU 변동성 감안)                    │
-│    - num_ctx=2048, num_predict=200, temperature=0   │
+│    - timeout 15s, num_ctx=2048, num_predict=200, temperature=0 │
 │    - 입력: Lead 분류 + 의사 + survey_payload 요약    │
-│    - 출력: { grade, score, nextAction, reason }      │
+│    - 출력 record: LeadScoreResult(grade, score,     │
+│      nextAction, reason) - JSON 파싱 코드 0줄        │
 │ 4. LeadScore 업데이트 (DONE | RULE_ONLY | FAILED)    │
 └─────────────────────────────────────────────────────┘
     ↓ (FAILED 경우)
@@ -869,6 +873,79 @@ LeadSubmittedEvent 발행
 
 - Ollama `/api/show` 응답의 `digest`를 `model_version`에 기록
 - 모델 교체 시 어드민이 `force=true`로 일괄 재분석 가능 (`POST /api/admin/leads/rescore?model=qwen2.5:1.5b`)
+
+#### 4.6.9 Spring AI 사용 패턴
+
+**의존성 (build.gradle)**
+```gradle
+implementation 'org.springframework.boot:spring-boot-starter-web'
+implementation 'org.springframework.ai:spring-ai-starter-model-ollama'
+```
+
+**LeadScoreResult record (구조화 출력 타깃)**
+```java
+public record LeadScoreResult(
+    Grade grade,            // A | B | C
+    int score,              // 0-100
+    NextAction nextAction,  // enum
+    String reason
+) {}
+```
+
+**`LeadScoringPipeline` 핵심 호출**
+```java
+@Service
+class LeadScoringPipeline {
+    private final ChatClient chatClient;
+    private final AiPromptService promptService;
+    private final AiRuleEvaluator ruleEvaluator;
+
+    public LeadScoringPipeline(ChatClient.Builder builder,
+                               AiPromptService promptService,
+                               AiRuleEvaluator ruleEvaluator) {
+        this.chatClient = builder
+            .defaultOptions(OllamaOptions.builder()
+                .model("qwen2.5:1.5b")
+                .temperature(0.0)
+                .numCtx(2048)
+                .numPredict(200)
+                .build())
+            .defaultAdvisors(new SimpleLoggerAdvisor())
+            .build();
+        this.promptService = promptService;
+        this.ruleEvaluator = ruleEvaluator;
+    }
+
+    @Async
+    @Retryable(maxAttempts = 3, backoff = @Backoff(delay = 30_000, multiplier = 10))
+    public LeadScoreResult score(Lead lead) {
+        // 1. 룰 선적용
+        RuleOutcome rule = ruleEvaluator.evaluate(lead);
+        if (rule.isTerminal()) return rule.toResult();   // LLM 호출 생략
+
+        // 2. LLM 호출 (Spring AI ChatClient)
+        PromptTemplate tpl = promptService.activePromptTemplate();
+        return chatClient.prompt()
+            .system(tpl.render(lead, rule.hints()))
+            .user("위 입력으로 등급을 평가하세요.")
+            .call()
+            .entity(LeadScoreResult.class);          // ← JSON 파싱 자동
+    }
+}
+```
+
+**효과**
+- `format=json` 강제, OutputParser 작성, Jackson 매핑 등의 코드가 모두 사라짐
+- 응답 스키마 변경 시 record만 수정하면 됨
+- Micrometer 메트릭(`spring.ai.chat.client.*`)으로 호출 횟수/지연 자동 집계 → 어드민 대시보드에 노출 가능
+
+#### 4.6.10 Spring AI Advisors 활용
+
+| Advisor | 용도 |
+| --- | --- |
+| `SimpleLoggerAdvisor` | 모든 LLM 호출 prompt/response 로깅 (개발/디버깅) |
+| `MessageChatMemoryAdvisor` | (확장) follow-up message 생성 시 대화 컨텍스트 유지 |
+| 커스텀 `RuleContextAdvisor` | 시스템 메시지 앞에 `ruleHits`를 자동 주입 |
 
 ### 4.7 AI 후속 메시지 (확장) — `POST /api/ai/follow-up-message` (ADMIN)
 
@@ -1394,9 +1471,8 @@ src/main/java/io/whatap/picker/
 ├── PickerApplication.java
 ├── config/
 │   ├── SecurityConfig.java
-│   ├── OllamaConfig.java
 │   ├── WebConfig.java
-│   └── BootstrapAdminRunner.java       # 최초 어드민 시드
+│   └── BootstrapAdminRunner.java       # 최초 어드민 시드 (Ollama는 spring-ai-starter가 자동 구성)
 ├── auth/
 │   ├── AuthController.java
 │   ├── AuthService.java
@@ -1446,7 +1522,7 @@ src/main/java/io/whatap/picker/
 │   │   ├── ScoringRetryScheduler.java    # 30s/5m/30m 백오프
 │   │   └── PendingMonitorJob.java        # 1h+ PENDING 어드민 알림
 │   ├── FollowUpMessageService.java       # 확장
-│   └── client/OllamaClient.java
+│   └── config/ChatClientConfig.java       # Spring AI ChatClient.Builder + 기본 옵션 + Advisors
 ├── admin/
 │   ├── AdminEventController.java
 │   ├── AdminPrizeController.java
@@ -1525,13 +1601,14 @@ src/main/resources/templates/
 
 ## 7. 개발 단계 (해커톤 타임라인)
 
-> AI 룰 엔진 + 마케터 편집 UI 추가로 **약 21~25h** 추정. 2.5~3일 분량. 해커톤 시연만 기준이면 룰 엔진/프롬프트 편집 UI는 Phase 9로 미루고 룰은 하드코딩으로 시작 가능.
+> Spring AI 도입으로 JSON 파싱/HTTP 클라이언트 코드 사라져 약 0.5h 절감. **약 20~24h** (2.5~3일 분량). 해커톤 시연만 기준이면 룰/프롬프트 편집 UI는 Phase 9로 미루고 시드 룰 하드코딩으로 시작 가능.
 
 ### Phase 0 — 인프라 셋업 (1h)
-- Spring Boot 프로젝트 생성, Gradle (web + thymeleaf + jpa + security + validation)
+- **Spring Boot 4.x** 프로젝트 생성, Gradle
+- 의존성: `web` + `thymeleaf` + `data-jpa` + `security` + `validation` + `flyway-postgresql` + **`spring-ai-starter-model-ollama`**
 - `docker-compose.yml` 작성 (Postgres + Ollama + 앱)
 - Flyway 초기 마이그레이션, 공통 예외 핸들러, Springdoc OpenAPI
-- Ollama 컨테이너에 `qwen2.5:1.5b` pull (~1GB)
+- Ollama 컨테이너에 `qwen2.5:1.5b` pull (`spring.ai.ollama.init.pull-model-strategy=when_missing`로 앱이 자동 처리도 가능)
 
 ### Phase 1 — 인증 (1.5h)
 - `AppUser` + BCrypt, Spring Security 6 + JWT
@@ -1572,17 +1649,19 @@ src/main/resources/templates/
 - `LeadAnalyticsService` + §4.B 7개 엔드포인트
 - JSONB 집계 SQL, `@Cacheable` 60초
 
-### Phase 8 — AI 리드 등급 (3h)
-- `OllamaClient` + JSON 파싱 + 재시도 (`@Retryable` 백오프 30s/5m/30m)
-- `LeadScoringPipeline` (룰 선적용 → LLM 폴백)
+### Phase 8 — AI 리드 등급 (2.5h, Spring AI 도입으로 단축)
+- `ChatClientConfig`: `ChatClient.Builder` + `OllamaOptions` + `SimpleLoggerAdvisor`
+- `LeadScoreResult` record + Spring AI 구조화 출력 (BeanOutputConverter 자동)
 - `AiRuleEvaluator` JSONB condition 평가
-- 시드 룰 5개 + 시드 프롬프트 1개 Flyway 마이그레이션
+- `LeadScoringPipeline` (룰 선적용 → `ChatClient.entity()` 폴백)
+- `@Async` + `@Retryable` 백오프 (`spring.ai.retry.*`로도 설정 가능)
+- 시드 룰 10개 + 시드 프롬프트 1개 Flyway 마이그레이션
 - `PATCH /api/admin/leads/{id}/score` 수동 수정
 - `/api/admin/ai-rules`, `/api/admin/ai-prompts` CRUD + SSR 페이지
 - `PendingMonitorJob` (PENDING 1h+ 카운트)
 
 ### Phase 9 — 통합 & 데모 (2h 데모 + 잉여)
-- Phase 0~8 합계 ≈ 21h, **버퍼 + 데모 리허설 2~3h 확보 → 총 23~25h**
+- Phase 0~8 합계 ≈ 20.5h, **버퍼 + 데모 리허설 2~3h 확보 → 총 22.5~24h**
 - 데모 시나리오: 어드민 행사 생성 → 폼 커스텀 → 경품 세팅(`/admin/events/{id}/prizes`) → QR 풀스크린 → 모바일 QR 스캔 → 설문 → 운영자 로그인 → 검색 → 뽑기 → AI 등급 → 대시보드 → CSV 다운로드
 - 여유 시: 폼 시각화 빌더, follow-up message, XLSX export, 자동 파기 배치, 동의 철회 셀프 API
 
@@ -1616,15 +1695,26 @@ spring:
   flyway:
     enabled: true
 
-ollama:
-  base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
-  model: ${OLLAMA_MODEL:qwen2.5:1.5b}    # GPU 없이 CPU에서 1~3초, ~1GB RAM
-  timeout-seconds: 15                      # CPU 변동 대비
-  options:                                 # Ollama 호출 시 파라미터
-    temperature: 0                         # 결정성 우선
-    num_ctx: 2048                          # 컨텍스트 축소
-    num_predict: 200                       # 응답 길이 제한 (JSON 출력만)
-    top_p: 0.9
+spring.ai:
+  ollama:
+    base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+    init:
+      pull-model-strategy: when_missing    # 앱 기동 시 모델 자동 pull
+      timeout: 5m
+    chat:
+      options:
+        model: ${OLLAMA_MODEL:qwen2.5:1.5b}  # ~1GB, CPU 1~3초
+        temperature: 0.0                     # 결정성 우선
+        num-ctx: 2048
+        num-predict: 200
+        top-p: 0.9
+
+  # 호출 옵션
+  retry:
+    max-attempts: 3
+    backoff:
+      initial-interval: 30s
+      multiplier: 10                         # 30s → 5m → 50m
 
 security:
   jwt:
@@ -1766,6 +1856,8 @@ curl http://localhost:8080/actuator/health
 - ✅ PENDING 모니터링: 1h+ PENDING 카운트, 일괄 재분석 API
 - ✅ Ollama 최소 리소스: CPU 2코어 + 메모리 3GB 상한, `OLLAMA_NUM_PARALLEL=1`, `MAX_LOADED_MODELS=1`, `KEEP_ALIVE=10m`
 - ✅ 룰 시드 10개로 강화: 결정적 룰 8개 + LLM 힌트 2개 → 약 80~85% Lead가 LLM 호출 없이 분류
+- ✅ Spring Boot 4.x + Spring AI 1.x: `ChatClient` + `BeanOutputConverter` 구조화 출력, Advisors, Micrometer 자동 통합
+- ✅ Java 21, Spring Security 7, Hibernate 7 (SB4 기본)
 - [ ] 자동 파기 배치 — 어드민 수동 버튼만으로 갈지, `@Scheduled` 잡 추가할지
 - [ ] 동의 철회 API — `event@whatap.io` 수신 수동 처리만 vs `POST /api/leads/{id}/withdraw`
 - [ ] 폼 빌더 UI 수준 — JSON 직편집 MVP 충분한지 vs 시각화 빌더까지 가야 하는지
@@ -1789,7 +1881,8 @@ curl http://localhost:8080/actuator/health
 12. **보안 기본기**: BCrypt, JWT, IP 기반 brute force 잠금, 공개 엔드포인트 rate limit, 검증 실패 시도 로깅
 13. **하이브리드 AI 등급**: 시드 룰 8개로 약 80~85% Lead를 LLM 호출 없이 즉시 분류, 나머지 borderline만 LLM 평가 — CPU 환경에서도 처리량 확보
 14. **마케터 셀프 서비스 AI**: 룰/프롬프트를 코드 배포 없이 어드민 UI에서 편집, 시뮬레이션으로 검증, 일괄 재분석 가능
+15. **Spring AI 1.x 활용**: `ChatClient.entity(Record.class)`로 JSON 파싱 코드 제거, `PromptTemplate` 변수 치환, Advisors로 로깅, Micrometer 메트릭 자동 통합 — Spring Boot 4 + Spring AI의 표준 패턴을 그대로 적용
 
 ---
 
-*이 계획서는 화요일 개발 논의용 v7 (Ollama 최소 리소스 모드: GPU 불요, qwen2.5:1.5b, CPU 2코어/메모리 3GB 상한, 룰 시드 10개로 LLM 호출 최소화) 입니다.*
+*이 계획서는 화요일 개발 논의용 v8 (Spring Boot 4 + Spring AI 1.x 도입, ChatClient 구조화 출력, JSON 파싱 코드 제거) 입니다.*
