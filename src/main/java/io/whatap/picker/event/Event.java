@@ -42,6 +42,15 @@ public class Event {
     @Column(name = "qr_image_path", length = 255)
     private String qrImagePath;
 
+    @Column(name = "spreadsheet_id", length = 255)
+    private String spreadsheetId;
+
+    @Column(name = "sheet_name", length = 255)
+    private String sheetName;
+
+    @Column(name = "sheets_enabled", nullable = false)
+    private boolean sheetsEnabled = false;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private EventStatus status = EventStatus.DRAFT;
@@ -77,6 +86,12 @@ public class Event {
     public void setFormLocked(boolean v) { this.formLocked = v; }
     public String getQrImagePath() { return qrImagePath; }
     public void setQrImagePath(String v) { this.qrImagePath = v; }
+    public String getSpreadsheetId() { return spreadsheetId; }
+    public void setSpreadsheetId(String v) { this.spreadsheetId = v; }
+    public String getSheetName() { return sheetName; }
+    public void setSheetName(String v) { this.sheetName = v; }
+    public boolean isSheetsEnabled() { return sheetsEnabled; }
+    public void setSheetsEnabled(boolean v) { this.sheetsEnabled = v; }
     public EventStatus getStatus() { return status; }
     public void setStatus(EventStatus v) { this.status = v; }
     public UUID getCreatedBy() { return createdBy; }

@@ -11,6 +11,9 @@ import io.whatap.picker.event.EventRepository;
 import io.whatap.picker.event.EventStatus;
 import io.whatap.picker.form.FormTemplate;
 import io.whatap.picker.form.FormTemplateService;
+import io.whatap.picker.lead.Lead;
+import io.whatap.picker.lead.LeadRepository;
+import io.whatap.picker.sheets.SheetsSyncService;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -28,13 +31,19 @@ public class AdminEventController {
     private final EventRepository eventRepository;
     private final FormTemplateService formTemplateService;
     private final DrawHistoryRepository drawHistoryRepository;
+    private final SheetsSyncService sheetsSyncService;
+    private final LeadRepository leadRepository;
 
     public AdminEventController(EventRepository eventRepository,
                                 FormTemplateService formTemplateService,
-                                DrawHistoryRepository drawHistoryRepository) {
+                                DrawHistoryRepository drawHistoryRepository,
+                                SheetsSyncService sheetsSyncService,
+                                LeadRepository leadRepository) {
         this.eventRepository = eventRepository;
         this.formTemplateService = formTemplateService;
         this.drawHistoryRepository = drawHistoryRepository;
+        this.sheetsSyncService = sheetsSyncService;
+        this.leadRepository = leadRepository;
     }
 
     @PostMapping
@@ -127,6 +136,36 @@ public class AdminEventController {
         eventRepository.delete(event);
     }
 
+    @PutMapping("/{id}/sheets")
+    public Event updateSheets(@PathVariable UUID id, @RequestBody SheetsConfigRequest req) {
+        Event event = eventRepository.findById(id)
+                .orElseThrow(() -> new ApiException(ErrorCode.EVENT_NOT_FOUND));
+        if (req.spreadsheetId != null) event.setSpreadsheetId(req.spreadsheetId.trim().isEmpty() ? null : req.spreadsheetId.trim());
+        if (req.sheetName != null)     event.setSheetName(req.sheetName.trim().isEmpty() ? null : req.sheetName.trim());
+        if (req.enabled != null)       event.setSheetsEnabled(req.enabled);
+        return eventRepository.save(event);
+    }
+
+    /** 행사 내 모든 리드를 Sheets 에 재동기화. 비동기 큐가 아닌 동기로 순차 append. */
+    @PostMapping("/{id}/sheets/sync")
+    public Map<String, Object> syncSheets(@PathVariable UUID id) {
+        Event event = eventRepository.findById(id)
+                .orElseThrow(() -> new ApiException(ErrorCode.EVENT_NOT_FOUND));
+        if (!event.isSheetsEnabled() || event.getSpreadsheetId() == null || event.getSpreadsheetId().isBlank()) {
+            throw new ApiException(ErrorCode.VALIDATION_FAILED, "이 행사에 Sheets 매핑이 설정되어 있지 않습니다.");
+        }
+        List<Lead> leads = leadRepository.findAll().stream()
+                .filter(l -> l.getEventId().equals(event.getId())).toList();
+        int ok = 0, fail = 0;
+        String firstError = null;
+        for (Lead l : leads) {
+            try { sheetsSyncService.syncOne(l.getId(), event.getId()); ok++; }
+            catch (Exception e) { fail++; if (firstError == null) firstError = e.getMessage(); }
+        }
+        return Map.of("total", leads.size(), "ok", ok, "fail", fail,
+                "firstError", firstError == null ? "" : firstError);
+    }
+
     @PostMapping("/{id}/regenerate-qr")
     public Map<String, Object> regenerateQr(@PathVariable UUID id) {
         Event event = eventRepository.findById(id)
@@ -138,5 +177,11 @@ public class AdminEventController {
                 "eventCode", event.getEventCode(),
                 "qrUrl", "/event/" + event.getEventCode() + "/qr.png"
         );
+    }
+
+    public static class SheetsConfigRequest {
+        public String spreadsheetId;
+        public String sheetName;
+        public Boolean enabled;
     }
 }

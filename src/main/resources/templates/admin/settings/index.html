@@ -49,6 +49,60 @@
         </form>
     </div>
 
+    <!-- ─── Google Sheets ─── -->
+    <div class="card">
+        <h2>📊 Google Sheets 연동 (Service Account)</h2>
+        <p class="muted">
+            리드가 제출될 때 행사별로 매핑된 Google Sheets 에 자동으로 한 행 append.
+            Service Account JSON 키를 발급해서 붙여넣고, 대상 시트를 해당 서비스 계정 이메일에 <strong>Editor</strong> 로 공유하세요.
+            매핑은 행사 관리 페이지에서 행마다 따로 설정.
+        </p>
+
+        <div id="google-status" class="muted" style="margin: 12px 0 18px;">로드 중...</div>
+
+        <form onsubmit="return saveGoogle(event)" style="display:grid; gap:14px; max-width: 720px;">
+            <label style="display:flex; flex-direction:column; gap:4px;">
+                <span style="font-weight:600;">Service Account JSON</span>
+                <textarea name="serviceAccountJson" rows="6" placeholder='{
+  "type": "service_account",
+  "project_id": "...",
+  "private_key_id": "...",
+  "private_key": "-----BEGIN PRIVATE KEY-----\n...",
+  "client_email": "...@....iam.gserviceaccount.com",
+  ...
+}' style="width:100%; font-family:monospace; font-size:0.82rem;"></textarea>
+                <span class="field-help">
+                    Google Cloud Console → IAM & Admin → Service Accounts → Keys → ADD KEY → JSON.
+                    저장 후엔 값이 표시되지 않습니다. 변경하지 않으려면 비워두세요.
+                </span>
+            </label>
+            <div style="display:flex; gap:8px;">
+                <button type="submit" class="btn btn-primary">저장</button>
+                <button type="button" class="btn btn-danger" onclick="clearGoogle()">JSON 삭제</button>
+                <button type="button" class="btn btn-secondary" onclick="openTestModal()">연결 테스트</button>
+            </div>
+        </form>
+    </div>
+
+    <div id="test-modal" class="modal-backdrop" style="display:none;">
+        <div class="modal">
+            <h2>Google Sheets 연결 테스트</h2>
+            <p class="muted">테스트할 Spreadsheet ID 를 입력하세요. <br>
+                URL <code>https://docs.google.com/spreadsheets/d/<strong>SPREADSHEET_ID</strong>/edit</code> 의 굵은 부분.</p>
+            <form onsubmit="return runTest(event)">
+                <div class="form-row">
+                    <label>Spreadsheet ID</label>
+                    <input name="spreadsheetId" required placeholder="1AbCdEf...">
+                </div>
+                <p id="test-result" class="muted" style="margin:8px 0;"></p>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeTestModal()">닫기</button>
+                    <button type="submit" class="btn btn-primary">테스트</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div class="card">
         <h2>현재 적용 우선순위</h2>
         <ol style="margin: 0; padding-left: 22px; line-height: 1.9;">
@@ -72,6 +126,12 @@
             const f = document.forms[0];
             f.model.value = a.model || '';
             f.enabled.checked = !!a.enabled;
+
+            const g = data.google || {};
+            const gs = document.getElementById('google-status');
+            gs.innerHTML = g.configured
+                ? `✅ <strong>등록됨</strong> · 서비스 계정 <code>${g.serviceAccountEmail || '(이메일 파싱 실패)'}</code>`
+                : '⚠️ Service Account JSON 이 설정되지 않았습니다.';
         } catch (e) {
             document.getElementById('anthropic-status').textContent = '로드 실패: ' + e.message;
         }
@@ -101,6 +161,45 @@
             toast('키가 삭제되었습니다.');
             load();
         } catch (e) { toast(e.message, true); }
+    }
+
+    async function saveGoogle(e) {
+        e.preventDefault();
+        const f = e.target;
+        const json = f.serviceAccountJson.value.trim();
+        if (!json) { toast('JSON 을 입력해 주세요.', true); return false; }
+        try {
+            await adminApi.put('/api/admin/settings', { google: { serviceAccountJson: json } });
+            toast('저장되었습니다.');
+            f.serviceAccountJson.value = '';
+            load();
+        } catch (e) { toast(e.message, true); }
+        return false;
+    }
+
+    async function clearGoogle() {
+        if (!confirm('Google Service Account JSON 을 삭제할까요? 행사별 매핑은 유지됩니다.')) return;
+        try {
+            await adminApi.del('/api/admin/settings/google/service-account');
+            toast('JSON 삭제됨');
+            load();
+        } catch (e) { toast(e.message, true); }
+    }
+
+    function openTestModal()  { document.getElementById('test-modal').style.display = 'flex';
+                                document.getElementById('test-result').textContent = ''; }
+    function closeTestModal() { document.getElementById('test-modal').style.display = 'none'; }
+    async function runTest(e) {
+        e.preventDefault();
+        const id = e.target.spreadsheetId.value.trim();
+        const out = document.getElementById('test-result');
+        out.textContent = '연결 중...';
+        try {
+            const r = await adminApi.post('/api/admin/settings/google/test', { spreadsheetId: id });
+            if (r.ok) { out.innerHTML = `<span style="color:var(--success);">✅ 연결 성공: <strong>${r.title}</strong></span>`; }
+            else      { out.innerHTML = `<span class="error">❌ ${r.error}</span>`; }
+        } catch (err) { out.innerHTML = `<span class="error">❌ ${err.message}</span>`; }
+        return false;
     }
 
     load();

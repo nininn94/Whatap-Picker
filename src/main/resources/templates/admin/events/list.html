@@ -22,7 +22,7 @@
                 <thead>
                 <tr>
                     <th>코드</th><th>라벨</th><th>일자</th><th>상태</th>
-                    <th>경품</th><th>QR</th><th>설문</th><th>리드</th><th style="width:160px;">관리</th>
+                    <th>경품</th><th>QR</th><th>설문</th><th>리드</th><th>Sheets</th><th style="width:160px;">관리</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -54,6 +54,11 @@
                         <a class="btn btn-sm btn-secondary"
                            th:href="@{/admin/leads(eventCode=${e.eventCode})}">리드 보기</a>
                     </td>
+                    <td th:attr="data-spreadsheet-id=${e.spreadsheetId}, data-sheet-name=${e.sheetName}, data-sheets-enabled=${e.sheetsEnabled}">
+                        <button class="btn btn-sm" th:classappend="${e.sheetsEnabled} ? 'btn-primary' : 'btn-secondary'"
+                                onclick="openSheetsModal(this)"
+                                th:text="${e.sheetsEnabled ? '📊 ON' : '📊 OFF'}"></button>
+                    </td>
                     <td>
                         <div class="btn-group">
                             <button class="btn btn-sm btn-ghost" onclick="regenerateQr(this)" title="QR 캐시 무효화">↻ QR</button>
@@ -62,7 +67,7 @@
                     </td>
                 </tr>
                 <tr th:if="${#lists.isEmpty(events)}">
-                    <td colspan="9" style="text-align:center; padding:32px 0;" class="muted">
+                    <td colspan="10" style="text-align:center; padding:32px 0;" class="muted">
                         등록된 행사가 없습니다. "+ 행사 생성"으로 추가하세요.
                     </td>
                 </tr>
@@ -71,6 +76,41 @@
         </div>
     </div>
 </main>
+
+<div id="sheets-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal">
+        <h2>📊 Google Sheets 매핑</h2>
+        <p class="muted">
+            이 행사에서 제출된 리드를 지정한 Google Sheet 의 마지막 행에 자동 append.
+            전제: <a href="/admin/settings">설정</a> 에 Service Account JSON 등록 + 시트를 해당 서비스 계정에 <strong>Editor</strong> 공유.
+        </p>
+        <form id="sheets-form" onsubmit="return submitSheets(event)">
+            <input type="hidden" name="eventId">
+            <div class="form-row">
+                <label>Spreadsheet ID</label>
+                <input name="spreadsheetId" placeholder="1AbCdEf...">
+                <span class="field-help">URL <code>/d/<strong>SPREADSHEET_ID</strong>/edit</code> 의 굵은 부분</span>
+            </div>
+            <div class="form-row">
+                <label>탭 이름 (Sheet name)</label>
+                <input name="sheetName" placeholder="Leads">
+                <span class="field-help">탭 이름이 없으면 'Leads'. 시트가 이미 존재해야 합니다.</span>
+            </div>
+            <div class="form-row">
+                <label style="display:flex; gap:8px; align-items:center;">
+                    <input name="enabled" type="checkbox">
+                    <span>활성화 — 새 리드 제출 시 자동 append</span>
+                </label>
+            </div>
+            <p id="sheets-modal-msg" class="muted" style="margin:8px 0;"></p>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeSheetsModal()">닫기</button>
+                <button type="button" class="btn btn-secondary" onclick="resyncSheets()">전체 재동기화</button>
+                <button type="submit" class="btn btn-primary">저장</button>
+            </div>
+        </form>
+    </div>
+</div>
 
 <div id="create-modal" class="modal-backdrop" style="display:none;">
     <div class="modal">
@@ -140,6 +180,55 @@
             await adminApi.post(`/api/admin/events/${btn.closest('tr').dataset.id}/regenerate-qr`);
             toast('QR 캐시가 무효화되었습니다.');
         } catch (e) { toast(e.message, true); }
+    }
+
+    function openSheetsModal(btn) {
+        const tr = btn.closest('tr');
+        const td = btn.closest('td');
+        const f = document.getElementById('sheets-form');
+        f.eventId.value       = tr.dataset.id;
+        f.spreadsheetId.value = td.dataset.spreadsheetId || '';
+        f.sheetName.value     = td.dataset.sheetName     || 'Leads';
+        f.enabled.checked     = td.dataset.sheetsEnabled === 'true';
+        document.getElementById('sheets-modal-msg').textContent = '';
+        document.getElementById('sheets-modal').style.display = 'flex';
+    }
+    function closeSheetsModal() { document.getElementById('sheets-modal').style.display = 'none'; }
+    async function submitSheets(e) {
+        e.preventDefault();
+        const f = e.target;
+        const id = f.eventId.value;
+        const body = {
+            spreadsheetId: f.spreadsheetId.value.trim(),
+            sheetName:     f.sheetName.value.trim() || 'Leads',
+            enabled:       f.enabled.checked
+        };
+        if (body.enabled && !body.spreadsheetId) {
+            toast('활성화하려면 Spreadsheet ID 가 필요합니다.', true);
+            return false;
+        }
+        try {
+            await adminApi.put(`/api/admin/events/${id}/sheets`, body);
+            toast('Sheets 설정이 저장되었습니다.');
+            setTimeout(() => location.reload(), 500);
+        } catch (e) { toast(e.message, true); }
+        return false;
+    }
+    async function resyncSheets() {
+        const id = document.getElementById('sheets-form').eventId.value;
+        if (!id) return;
+        if (!confirm('이 행사의 모든 기존 리드를 시트로 다시 동기화할까요? (중복 행이 생길 수 있습니다.)')) return;
+        document.getElementById('sheets-modal-msg').textContent = '동기화 중...';
+        try {
+            const r = await adminApi.post(`/api/admin/events/${id}/sheets/sync`);
+            document.getElementById('sheets-modal-msg').innerHTML =
+                `완료: 총 <strong>${r.total}</strong> · 성공 <strong>${r.ok}</strong>` +
+                (r.fail ? ` · 실패 <strong style="color:var(--danger)">${r.fail}</strong> (${r.firstError})` : '');
+            toast(`동기화 ${r.ok}/${r.total} 완료`);
+        } catch (e) {
+            document.getElementById('sheets-modal-msg').innerHTML = `<span class="error">실패: ${e.message}</span>`;
+            toast(e.message, true);
+        }
     }
 </script>
 <div th:replace="~{admin/layout :: scripts}"></div>

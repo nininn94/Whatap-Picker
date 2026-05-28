@@ -2,6 +2,7 @@ package io.whatap.picker.admin;
 
 import io.whatap.picker.auth.jwt.AppPrincipal;
 import io.whatap.picker.setting.AppSettingService;
+import io.whatap.picker.sheets.SheetsClient;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -16,9 +17,11 @@ import java.util.UUID;
 public class AdminSettingController {
 
     private final AppSettingService settings;
+    private final SheetsClient sheetsClient;
 
-    public AdminSettingController(AppSettingService settings) {
+    public AdminSettingController(AppSettingService settings, SheetsClient sheetsClient) {
         this.settings = settings;
+        this.sheetsClient = sheetsClient;
     }
 
     /**
@@ -35,6 +38,11 @@ public class AdminSettingController {
                 "apiKeyMask", mask(apiKey),
                 "configured", apiKey != null && !apiKey.isBlank()
         ));
+        String saJson = settings.googleServiceAccountJson();
+        Map<String, Object> google = new LinkedHashMap<>();
+        google.put("configured", saJson != null && !saJson.isBlank());
+        google.put("serviceAccountEmail", extractClientEmail(saJson));
+        out.put("google", google);
         return out;
     }
 
@@ -53,6 +61,12 @@ public class AdminSettingController {
                 settings.put(AppSettingService.ANTHROPIC_ENABLED, String.valueOf(req.anthropic.enabled), actorId);
             }
         }
+        if (req.google != null) {
+            if (req.google.serviceAccountJson != null && !req.google.serviceAccountJson.isBlank()) {
+                settings.put(AppSettingService.GOOGLE_SERVICE_ACCOUNT_JSON,
+                        req.google.serviceAccountJson.trim(), actorId);
+            }
+        }
         return get();
     }
 
@@ -62,18 +76,59 @@ public class AdminSettingController {
         return get();
     }
 
+    @DeleteMapping("/google/service-account")
+    public Map<String, Object> clearGoogleServiceAccount(@AuthenticationPrincipal AppPrincipal actor) {
+        settings.put(AppSettingService.GOOGLE_SERVICE_ACCOUNT_JSON, "",
+                actor != null ? actor.userId() : null);
+        return get();
+    }
+
+    /** Sheets 연결 테스트 — 시트 ID 의 메타데이터(타이틀) 조회. */
+    @PostMapping("/google/test")
+    public Map<String, Object> testGoogle(@RequestBody TestSheetRequest req) {
+        if (req == null || req.spreadsheetId == null || req.spreadsheetId.isBlank()) {
+            return Map.of("ok", false, "error", "spreadsheetId 가 필요합니다.");
+        }
+        try {
+            String title = sheetsClient.testConnection(req.spreadsheetId.trim());
+            return Map.of("ok", true, "title", title);
+        } catch (Exception e) {
+            return Map.of("ok", false, "error", e.getMessage() == null ? e.toString() : e.getMessage());
+        }
+    }
+
     private static String mask(String key) {
         if (key == null || key.isBlank()) return null;
         if (key.length() <= 10) return "********";
         return key.substring(0, 7) + "***" + key.substring(key.length() - 4);
     }
 
+    /** Service Account JSON 에서 client_email 만 파싱해 표시용으로 반환. */
+    private static String extractClientEmail(String json) {
+        if (json == null) return null;
+        int i = json.indexOf("\"client_email\"");
+        if (i < 0) return null;
+        int colon = json.indexOf(':', i);
+        int q1 = json.indexOf('"', colon + 1);
+        int q2 = json.indexOf('"', q1 + 1);
+        if (q1 < 0 || q2 < 0) return null;
+        return json.substring(q1 + 1, q2);
+    }
+
     public static class UpdateRequest {
         public Anthropic anthropic;
+        public Google google;
         public static class Anthropic {
             public String apiKey;
             public String model;
             public Boolean enabled;
         }
+        public static class Google {
+            public String serviceAccountJson;
+        }
+    }
+
+    public static class TestSheetRequest {
+        public String spreadsheetId;
     }
 }

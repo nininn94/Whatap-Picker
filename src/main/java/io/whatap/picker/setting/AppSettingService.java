@@ -17,6 +17,9 @@ public class AppSettingService {
 
     public static final String DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5";
 
+    // Google Sheets 관련 설정 키 — Service Account JSON 통째로 저장.
+    public static final String GOOGLE_SERVICE_ACCOUNT_JSON = "google.service_account_json";
+
     private final AppSettingRepository repository;
 
     public AppSettingService(AppSettingRepository repository) {
@@ -69,5 +72,15 @@ public class AppSettingService {
 
     public String anthropicModel() {
         return getOrDefault(ANTHROPIC_MODEL, DEFAULT_ANTHROPIC_MODEL);
+    }
+
+    // ---- 편의 메서드 (Google Sheets) ----
+
+    public boolean isGoogleSheetsConfigured() {
+        return get(GOOGLE_SERVICE_ACCOUNT_JSON).map(v -> !v.isBlank()).orElse(false);
+    }
+
+    public String googleServiceAccountJson() {
+        return get(GOOGLE_SERVICE_ACCOUNT_JSON).orElse(null);
     }
 }

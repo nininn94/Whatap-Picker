@@ -56,6 +56,11 @@ dependencies {
     // OpenAPI docs
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.7.0")
 
+    // Google Sheets (service account → OAuth token → Sheets API)
+    implementation("com.google.auth:google-auth-library-oauth2-http:1.30.0")
+    implementation("com.google.api-client:google-api-client:2.7.0")
+    implementation("com.google.apis:google-api-services-sheets:v4-rev20240826-2.0.0")
+
     // Test
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")

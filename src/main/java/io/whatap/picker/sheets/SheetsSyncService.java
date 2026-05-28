@@ -1,0 +1,103 @@
+package io.whatap.picker.sheets;
+
+import io.whatap.picker.event.Event;
+import io.whatap.picker.event.EventRepository;
+import io.whatap.picker.lead.Lead;
+import io.whatap.picker.lead.LeadRepository;
+import io.whatap.picker.lead.event.LeadSubmittedEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * 리드 제출 이벤트를 받아 Google Sheets 에 행을 append.
+ * 행사 단위로 spreadsheet 매핑이 활성화돼 있고 Service Account JSON 도 설정돼 있을 때만 동작.
+ * 실패는 로그만 남기고 본 제출에는 영향 없음.
+ */
+@Service
+public class SheetsSyncService {
+
+    private static final Logger log = LoggerFactory.getLogger(SheetsSyncService.class);
+
+    private static final List<Object> HEADER = Arrays.asList(
+            "제출시각", "이벤트 코드",
+            "성", "이름", "회사", "이메일", "휴대폰",
+            "산업", "직무", "직급", "기업규모", "직원수",
+            "모니터링 상태", "관심 제품", "1년 계획", "상담 희망", "망설이는 이유",
+            "리드 ID"
+    );
+
+    private final SheetsClient sheets;
+    private final EventRepository eventRepository;
+    private final LeadRepository leadRepository;
+
+    public SheetsSyncService(SheetsClient sheets,
+                             EventRepository eventRepository,
+                             LeadRepository leadRepository) {
+        this.sheets = sheets;
+        this.eventRepository = eventRepository;
+        this.leadRepository = leadRepository;
+    }
+
+    @Async
+    @EventListener
+    @Transactional(readOnly = true)
+    public void onLeadSubmitted(LeadSubmittedEvent ev) {
+        try { syncOne(ev.leadId(), ev.eventId()); }
+        catch (Exception e) { log.warn("Sheets sync 실패 leadId={}: {}", ev.leadId(), e.toString()); }
+    }
+
+    /** 행사+리드 한 쌍을 시트에 append (테스트/재동기화에서도 호출). */
+    public void syncOne(UUID leadId, UUID eventId) throws Exception {
+        Event event = eventRepository.findById(eventId).orElse(null);
+        if (event == null) return;
+        if (!event.isSheetsEnabled() || event.getSpreadsheetId() == null || event.getSpreadsheetId().isBlank()) return;
+        if (!sheets.isConfigured()) {
+            log.debug("Sheets 미설정 — skip (eventId={})", eventId);
+            return;
+        }
+        Lead lead = leadRepository.findById(leadId).orElse(null);
+        if (lead == null) return;
+
+        String sheetName = (event.getSheetName() == null || event.getSheetName().isBlank())
+                ? "Leads" : event.getSheetName();
+
+        sheets.ensureHeader(event.getSpreadsheetId(), sheetName, HEADER);
+        sheets.appendRow(event.getSpreadsheetId(), sheetName, toRow(event, lead));
+    }
+
+    private static List<Object> toRow(Event event, Lead l) {
+        List<Object> row = new ArrayList<>();
+        row.add(l.getCreatedAt() != null ? l.getCreatedAt().toString() : "");
+        row.add(event.getEventCode());
+        row.add(nz(l.getLastName()));
+        row.add(nz(l.getFirstName()));
+        row.add(nz(l.getCompany()));
+        row.add(nz(l.getEmail()));
+        row.add(nz(l.getPhone()));
+        row.add(nameOf(l.getIndustry()));
+        row.add(nameOf(l.getJobFunction()));
+        row.add(nameOf(l.getJobLevel()));
+        row.add(nameOf(l.getCompanySize()));
+        row.add(nameOf(l.getEmployeeCountRange()));
+        row.add(nameOf(l.getMonitoringStatus()));
+        row.add(l.getInterestProducts() == null
+                ? "" : l.getInterestProducts().stream().map(Enum::name).reduce((a,b) -> a + ", " + b).orElse(""));
+        row.add(nameOf(l.getPlanWithinYear()));
+        row.add(nameOf(l.getConsultationPreference()));
+        row.add(nameOf(l.getAdoptionBlocker()));
+        row.add(l.getId() != null ? l.getId().toString() : "");
+        return row;
+    }
+
+    private static String nz(String s) { return s == null ? "" : s; }
+    private static String nameOf(Enum<?> e) { return e == null ? "" : e.name(); }
+}
