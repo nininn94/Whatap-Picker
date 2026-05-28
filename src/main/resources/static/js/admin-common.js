@@ -135,6 +135,37 @@ function renderMarkdown(text) {
     return blocks.join('\n');
 }
 
+/**
+ * 시간이 걸리는 작업용 모달 오버레이.
+ * 사용:
+ *   const done = busy('재분석 중...');
+ *   try { ... } finally { done(); }
+ * 또는:
+ *   await busy.run('재분석 중...', async () => { ... });
+ */
+function busy(message) {
+    let el = document.getElementById('busy-overlay');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'busy-overlay';
+        el.innerHTML = `
+            <div class="busy-card">
+                <div class="busy-spinner"></div>
+                <div class="busy-msg"></div>
+                <div class="busy-sub muted">완료될 때까지 잠시 기다려 주세요</div>
+            </div>`;
+        document.body.appendChild(el);
+    }
+    el.querySelector('.busy-msg').textContent = message || '처리 중...';
+    el.classList.add('is-on');
+    return function done() { el.classList.remove('is-on'); };
+}
+busy.run = async function (message, fn) {
+    const done = busy(message);
+    try { return await fn(); }
+    finally { done(); }
+};
+
 function toast(msg, isError = false) {
     let el = document.getElementById('toast');
     if (!el) {

@@ -354,6 +354,32 @@ table input[type=text], table input[type=number] {
     background: var(--surface-2);
 }
 
+/* ──────────────────  Busy 오버레이 (진행 중 표시)  ────────────────── */
+#busy-overlay {
+    position: fixed; inset: 0; z-index: 2000;
+    background: rgba(15, 23, 42, 0.45);
+    display: none;
+    align-items: center; justify-content: center;
+    animation: fade-in .15s ease;
+}
+#busy-overlay.is-on { display: flex; }
+#busy-overlay .busy-card {
+    background: var(--surface); border-radius: var(--radius-lg);
+    padding: 28px 36px; min-width: 280px; max-width: 420px;
+    box-shadow: 0 24px 48px rgba(15, 23, 42, 0.25);
+    text-align: center;
+}
+#busy-overlay .busy-msg  { font-weight: 600; font-size: 1rem; margin: 14px 0 6px; }
+#busy-overlay .busy-sub  { font-size: 0.85rem; }
+.busy-spinner {
+    width: 36px; height: 36px; margin: 0 auto;
+    border: 3px solid var(--border);
+    border-top-color: var(--brand);
+    border-radius: 50%;
+    animation: spin .9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* ──────────────────  토스트  ────────────────── */
 .toast {
     position: fixed; bottom: 24px; right: 24px;

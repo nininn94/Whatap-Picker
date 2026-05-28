@@ -219,6 +219,7 @@
         if (!id) return;
         if (!confirm('이 행사의 모든 기존 리드를 시트로 다시 동기화할까요? (중복 행이 생길 수 있습니다.)')) return;
         document.getElementById('sheets-modal-msg').textContent = '동기화 중...';
+        const done = busy('Google Sheets 전체 동기화 중...');
         try {
             const r = await adminApi.post(`/api/admin/events/${id}/sheets/sync`);
             document.getElementById('sheets-modal-msg').innerHTML =
@@ -228,7 +229,7 @@
         } catch (e) {
             document.getElementById('sheets-modal-msg').innerHTML = `<span class="error">실패: ${e.message}</span>`;
             toast(e.message, true);
-        }
+        } finally { done(); }
     }
 </script>
 <div th:replace="~{admin/layout :: scripts}"></div>

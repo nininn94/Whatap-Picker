@@ -133,20 +133,24 @@
         if (f.nextAction.value) body.nextAction = f.nextAction.value;
         if (f.reason.value) body.reason = f.reason.value;
         if (Object.keys(body).length === 0) { toast('변경할 값이 없습니다.', true); return false; }
+        const done = busy('Stage 저장 중...');
         try {
             await adminApi.patch(`/api/admin/leads/${leadId}/score`, body);
             toast('Stage 가 수정되었습니다 (MANUAL_OVERRIDE).');
-            renderAi();
+            await load();
         } catch (e) { toast(e.message, true); }
+        finally { done(); }
         return false;
     }
 
     async function rescoreOne() {
+        const done = busy('Stage 재분석 중...');
         try {
             await adminApi.post('/api/ai/lead-score', { leadId, force: true });
-            toast('재분석 트리거 완료');
-            setTimeout(renderAi, 1500);
+            toast('재분석 완료');
+            await load();
         } catch (e) { toast(e.message, true); }
+        finally { done(); }
     }
 
     load();
