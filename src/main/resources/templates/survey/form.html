@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head(title=${schema.title.asText() + ' - ' + event.label})}"></head>
+<body class="survey">
+<main class="container" x-data="surveyForm()">
+
+    <header class="survey-header">
+        <h1 th:text="${schema.title.asText()}">WhaTap 설문 이벤트</h1>
+        <p class="muted" th:text="${schema.subtitle.asText()}"></p>
+        <p class="event-label" th:text="${event.label}"></p>
+    </header>
+
+    <form id="survey-form" @submit.prevent="submit">
+        <input type="hidden" name="eventCode" th:value="${event.eventCode}" x-ref="eventCode">
+
+        <!-- 페이지 순회 -->
+        <template x-for="page in pages" :key="page.id">
+            <section class="page" x-show="visiblePage(page.id)" x-cloak>
+                <h2 x-text="page.title"></h2>
+
+                <template x-for="field in page.fields" :key="field.key">
+                    <div class="field" x-show="visibleField(field)" x-cloak>
+                        <label x-text="field.label" :class="field.required ? 'required' : ''"></label>
+                        <p class="helper" x-show="field.helper" x-text="field.helper" x-cloak></p>
+
+                        <!-- TEXT / EMAIL / PHONE -->
+                        <template x-if="['TEXT','EMAIL','PHONE'].includes(field.type)">
+                            <input :type="field.type === 'EMAIL' ? 'email' : (field.type === 'PHONE' ? 'tel' : 'text')"
+                                   :name="field.key" :required="field.required" x-model="values[field.key]"
+                                   :pattern="field.pattern">
+                        </template>
+
+                        <!-- LONG_ANSWER -->
+                        <template x-if="field.type === 'LONG_ANSWER'">
+                            <textarea :name="field.key" :required="field.required"
+                                      x-model="values[field.key]" rows="3"></textarea>
+                        </template>
+
+                        <!-- SELECT -->
+                        <template x-if="field.type === 'SELECT'">
+                            <select :name="field.key" :required="field.required" x-model="values[field.key]">
+                                <option value="">선택해주세요</option>
+                                <template x-for="opt in optionsFor(field)" :key="opt.value">
+                                    <option :value="opt.value" x-text="opt.label"></option>
+                                </template>
+                            </select>
+                        </template>
+
+                        <!-- RADIO -->
+                        <template x-if="field.type === 'RADIO'">
+                            <div class="options">
+                                <template x-for="opt in optionsFor(field)" :key="opt.value">
+                                    <label class="option">
+                                        <input type="radio" :name="field.key" :value="opt.value"
+                                               x-model="values[field.key]" :required="field.required">
+                                        <span x-text="opt.label"></span>
+                                    </label>
+                                </template>
+                            </div>
+                        </template>
+
+                        <!-- CHECKBOX_MULTI -->
+                        <template x-if="field.type === 'CHECKBOX_MULTI'">
+                            <div class="options">
+                                <template x-for="opt in optionsFor(field)" :key="opt.value">
+                                    <label class="option">
+                                        <input type="checkbox" :value="opt.value"
+                                               :checked="(values[field.key]||[]).includes(opt.value)"
+                                               @change="toggleMulti(field.key, opt.value)">
+                                        <span x-text="opt.label"></span>
+                                    </label>
+                                </template>
+                            </div>
+                        </template>
+
+                        <!-- SCALE_1_10 -->
+                        <template x-if="field.type === 'SCALE_1_10'">
+                            <div class="scale">
+                                <template x-for="n in 10" :key="n">
+                                    <label class="scale-item">
+                                        <input type="radio" :name="field.key" :value="n"
+                                               x-model.number="values[field.key]" :required="field.required">
+                                        <span x-text="n"></span>
+                                    </label>
+                                </template>
+                                <div class="scale-labels">
+                                    <span x-text="field.scaleLowLabel || ''"></span>
+                                    <span x-text="field.scaleHighLabel || ''"></span>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                <!-- 페이지 네비게이션 -->
+                <div class="nav">
+                    <button type="button" @click="prev" x-show="canGoPrev" x-cloak>이전</button>
+                    <button type="button" @click="next" x-show="hasNextPage(page.id)" x-cloak>다음 →</button>
+                </div>
+            </section>
+        </template>
+
+        <!-- 동의 (마지막 페이지 표시 시) -->
+        <section class="consents" x-show="isLastPageVisible()" x-cloak>
+            <h2>동의 항목</h2>
+            <template x-for="consent in consents" :key="consent.key">
+                <div class="consent">
+                    <h3 x-text="consent.label"></h3>
+                    <pre class="consent-body" x-text="consent.body"></pre>
+                    <label class="option">
+                        <input type="checkbox" :name="consent.key" x-model="values[consent.key]" required>
+                        <span>동의합니다.</span>
+                    </label>
+                </div>
+            </template>
+
+            <div class="nav">
+                <button type="button" @click="prev">이전</button>
+                <button type="submit" :disabled="submitting" x-text="submitting ? '제출 중...' : '제출하기'"></button>
+            </div>
+
+            <p class="error" x-show="error" x-text="error" x-cloak></p>
+        </section>
+    </form>
+</main>
+
+<!-- schema를 JS에 주입 -->
+<script th:inline="javascript">
+    const schemaJson = /*[[${schema}]]*/ {};
+    const eventCode = /*[[${event.eventCode}]]*/ "";
+</script>
+<script th:src="@{/js/survey.js}"></script>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head(title='행사 안내')}"></head>
+<body class="survey closed">
+<main class="container">
+    <div class="closed-message">
+        <h1>이 행사는 현재 참여할 수 없습니다.</h1>
+        <p>행사 기간이 종료되었거나, 아직 열리지 않았을 수 있습니다.</p>
+        <p class="muted" th:text="'행사 코드: ' + ${eventCode}"></p>
+    </div>
+</main>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>
