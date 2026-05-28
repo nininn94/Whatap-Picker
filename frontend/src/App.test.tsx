@@ -82,9 +82,9 @@ describe("App participant form", () => {
     await user.type(screen.getByLabelText("전화번호 뒷자리"), "1111");
     await user.click(screen.getByRole("button", { name: /이벤트 참여하기/ }));
 
-    expect(await screen.findByText("이벤트 및 테스트 관리")).toBeInTheDocument();
+    expect(await screen.findByText("이벤트 및 뽑기판 관리")).toBeInTheDocument();
     expect(screen.getByText(/현재 선택된 이벤트: event-1/)).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /500칸 뽑기 차트/ })).toBeInTheDocument();
+    expect(screen.getByText("이벤트를 선택하면 실제 경품 재고 기준 뽑기판이 표시됩니다.")).toBeInTheDocument();
   });
 
   it("initializes the picker board with API prize quantities", async () => {
@@ -102,11 +102,12 @@ describe("App participant form", () => {
     await user.type(screen.getByLabelText("전화번호 뒷자리"), "1111");
     await user.click(screen.getByRole("button", { name: /이벤트 참여하기/ }));
 
-    expect(await screen.findByRole("button", { name: /3등.*Mock API 3등/ })).toBeInTheDocument();
+    expect(await screen.findByText("이벤트 및 뽑기판 관리")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /500칸 뽑기 차트/ })).toBeInTheDocument();
     expect(localStorage.getItem("whatap-picker-display-v8") ?? "").not.toContain("\"cells\"");
   });
 
-  it("blocks picking when remaining API stock is zero", async () => {
+  it("keeps admin page on real inventory state when remaining API stock is zero", async () => {
     const user = userEvent.setup();
     renderAppWithEventCode("/?eventCode=event-1", [
       { rank: 1, name: "API 1등", initial: 20, awarded: 20, remaining: 0 },
@@ -120,9 +121,10 @@ describe("App participant form", () => {
     await user.type(screen.getByLabelText("이름"), "tap");
     await user.type(screen.getByLabelText("전화번호 뒷자리"), "1111");
     await user.click(screen.getByRole("button", { name: /이벤트 참여하기/ }));
-    await user.click(await screen.findByRole("button", { name: /3등.*Mock API 3등/ }));
 
-    expect(screen.getByText("선택 가능한 칸이 없습니다. 뽑기판을 초기화해 주세요.")).toBeInTheDocument();
+    expect(await screen.findByText("이벤트 및 뽑기판 관리")).toBeInTheDocument();
+    expect(screen.getByText(/현재 선택된 이벤트: event-1/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Mock/ })).not.toBeInTheDocument();
   });
 
   it("opens the management page without an event code", async () => {
@@ -134,7 +136,7 @@ describe("App participant form", () => {
     await user.type(screen.getByLabelText("전화번호 뒷자리"), "1111");
     await user.click(screen.getByRole("button", { name: /이벤트 참여하기/ }));
 
-    expect(await screen.findByText("이벤트 및 테스트 관리")).toBeInTheDocument();
+    expect(await screen.findByText("이벤트 및 뽑기판 관리")).toBeInTheDocument();
     expect(screen.getByText("현재 선택된 이벤트: 미선택")).toBeInTheDocument();
   });
 

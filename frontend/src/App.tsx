@@ -1,123 +1,59 @@
 "use client";
 
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, CheckCircle2, Phone, RotateCcw, UserRound } from "lucide-react";
-import {
-  PICK_REVEAL_DURATION_MS,
-  PickerCanvas,
-  type CellTone,
-  type PickerCell,
-} from "./PickerCanvas";
-import { Confetti } from "./Confetti";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { PICK_REVEAL_DURATION_MS } from "./PickerCanvas";
 import {
   DrawApiError,
   drawPrize,
-  fetchEvents,
   fetchDrawHistory,
+  fetchEvents,
   fetchPrizeInventory,
   searchLeads,
   type ApiEvent,
   type ApiPrize,
-  type DrawResponse,
-  type LeadSearchItem,
 } from "@/lib/draw-api";
-
-const PICKED_CELLS_STORAGE_KEY = "whatap-picker-display-v8";
-const EVENT_CODE_STORAGE_KEY = "whatap-picker-selected-event-code";
-const BOARD_COLUMNS = 50;
-const BOARD_ROWS = 10;
-const BOARD_CELL_COUNT = BOARD_COLUMNS * BOARD_ROWS;
-const TEST_PARTICIPANT_NAME = "whatap";
-const TEST_PARTICIPANT_PHONE_LAST_FOUR = "1111";
-const RESULT_HOLD_DURATION_MS = 1500;
-
-type Prize = {
-  rank: string;
-  name: string;
-  count: number;
-};
-
-type PickResult = {
-  id: string;
-  cellNumber: number;
-  rank: string;
-  name: string;
-  pickedAt: string;
-  participantName?: string;
-  participantPhoneLastFour?: string;
-  isMock?: boolean;
-};
-
-type PickerState = {
-  eventCode?: string;
-  eventTitle: string;
-  prizes: Prize[];
-  cells: PickerCell[];
-  results: PickResult[];
-};
-
-type ParticipantForm = {
-  lastName: string;
-  firstName: string;
-  phoneLastFour: string;
-};
-
-type Participant = {
-  leadId?: string;
-  name: string;
-  phoneLastFour: string;
-  eventCode?: string;
-  eventDate?: string;
-  company?: string;
-  jobLevel?: string;
-  aiStatus?: LeadSearchItem["aiStatus"];
-  grade?: LeadSearchItem["grade"];
-  score?: LeadSearchItem["score"];
-};
-
-type LeadOption = LeadSearchItem & {
-  eventCode: string;
-  eventDate: string;
-};
-
-type PickedCellsByEvent = Record<string, number[]>;
-
-const defaultPrizes: Prize[] = [
-  { rank: "1등", name: "프리미엄 굿즈", count: 10 },
-  { rank: "2등", name: "텀블러", count: 40 },
-  { rank: "3등", name: "스티커팩", count: 90 },
-  { rank: "4등", name: "쿠폰", count: 160 },
-  { rank: "5등", name: "참가 기념품", count: 200 },
-];
-
-function createDefaultState(
-  prizes: Prize[] = defaultPrizes,
-  eventCode = "",
-  pickedCellIndexes: number[] = [],
-  remainingCount = prizeTotalOf(prizes),
-): PickerState {
-  const normalizedPrizes = normalizePrizes(prizes);
-
-  return {
-    eventCode,
-    eventTitle: "Whatap 경품 뽑기",
-    prizes: normalizedPrizes,
-    cells: applyPickedAndStockLimit(
-      buildCells(normalizedPrizes),
-      eventCode,
-      pickedCellIndexes,
-      remainingCount,
-    ),
-    results: [],
-  };
-}
+import {
+  clearPickedCellIndexes,
+  createPickerState,
+  emptyPickerState,
+  loadPickerState,
+  prizesFromInventory,
+  prizeTotalOf,
+  readPickedCellIndexes,
+  remainingTotalOf,
+  rememberPickedCellIndex,
+} from "@/picker/board";
+import { BOARD_CELL_COUNT, BOARD_COLUMNS, BOARD_ROWS } from "@/picker/constants";
+import { AdminControlPage } from "@/picker/pages/AdminControlPage";
+import { DrawBoardPage } from "@/picker/pages/DrawBoardPage";
+import { DrawResultOverlay } from "@/picker/pages/DrawResultOverlay";
+import { ParticipantEntryPage } from "@/picker/pages/ParticipantEntryPage";
+import type {
+  LeadOption,
+  Participant,
+  ParticipantForm,
+  PickerState,
+  PickerView,
+  PickResult,
+  Prize,
+} from "@/picker/types";
+import {
+  apiErrorMessage,
+  digitsOnly,
+  drawResponseLabel,
+  eventStatusLabel,
+  isAdminSpecialAccount,
+  participantFormFullName,
+  pickResultFromDrawResponse,
+  prizeInventoryStatus,
+  readEventCode,
+  rememberEventCode,
+  updateEventCodeInUrl,
+} from "@/picker/utils";
 
 export default function App() {
-  const [state, setState] = useState<PickerState>(() => loadState());
+  const [view, setView] = useState<PickerView>("entry");
+  const [state, setState] = useState<PickerState>(() => loadPickerState());
   const [eventCode, setEventCode] = useState("");
   const [eventCodeDraft, setEventCodeDraft] = useState("");
   const [adminEvents, setAdminEvents] = useState<ApiEvent[]>([]);
@@ -134,7 +70,6 @@ export default function App() {
   });
   const [participant, setParticipant] = useState<Participant | null>(null);
   const [leadOptions, setLeadOptions] = useState<LeadOption[]>([]);
-  const [isTestMode, setIsTestMode] = useState(false);
   const [participantError, setParticipantError] = useState("");
   const [isCheckingParticipant, setIsCheckingParticipant] = useState(false);
   const [drawError, setDrawError] = useState("");
@@ -143,12 +78,11 @@ export default function App() {
   const [isRevealing, setIsRevealing] = useState(false);
   const [confettiTrigger, setConfettiTrigger] = useState(0);
   const revealTimerRef = useRef<number | null>(null);
-  const resultTimerRef = useRef<number | null>(null);
   const drawEffectRef = useRef<HTMLVideoElement | null>(null);
 
   const syncBoardWithInventory = useCallback((nextEventCode: string, nextPrizes: Prize[], remainingCount: number) => {
     const pickedCellIndexes = readPickedCellIndexes(nextEventCode);
-    setState(createDefaultState(nextPrizes, nextEventCode, pickedCellIndexes, remainingCount));
+    setState(createPickerState(nextPrizes, nextEventCode, pickedCellIndexes, remainingCount));
   }, []);
 
   useEffect(() => {
@@ -174,11 +108,14 @@ export default function App() {
       setSelectedEventDate(response.eventDate);
       const nextPrizes = prizesFromInventory(response.prizes);
 
-      if (nextPrizes.length > 0) {
+      if (nextPrizes.length === 0) {
+        setState(emptyPickerState(response.eventCode));
+      } else {
         const total = prizeTotalOf(nextPrizes);
         if (total === BOARD_CELL_COUNT) {
           syncBoardWithInventory(response.eventCode, nextPrizes, remainingTotalOf(response.prizes));
         } else {
+          setState(emptyPickerState(response.eventCode));
           setPrizeError(`경품 수량 합계가 ${total}개입니다. 뽑기판은 ${BOARD_CELL_COUNT}개가 필요합니다.`);
         }
       }
@@ -191,6 +128,7 @@ export default function App() {
     } catch (error) {
       setPrizeInventory([]);
       setSelectedEventDate("");
+      setState(emptyPickerState(nextEventCode));
       setPrizeError(apiErrorMessage(error, "경품 재고를 불러오지 못했습니다."));
     } finally {
       setIsLoadingPrizes(false);
@@ -230,22 +168,17 @@ export default function App() {
   }, [eventCode, loadPrizeInventory]);
 
   useEffect(() => {
-    if (!isTestMode) return;
+    if (view !== "admin") return;
     const timerId = window.setTimeout(() => {
       void loadAdminEvents();
     }, 0);
 
     return () => window.clearTimeout(timerId);
-  }, [isTestMode, loadAdminEvents]);
+  }, [view, loadAdminEvents]);
 
   useEffect(() => {
     return () => {
-      if (revealTimerRef.current !== null) {
-        window.clearTimeout(revealTimerRef.current);
-      }
-      if (resultTimerRef.current !== null) {
-        window.clearTimeout(resultTimerRef.current);
-      }
+      clearRevealTimer();
     };
   }, []);
 
@@ -259,30 +192,17 @@ export default function App() {
     void video.play().catch(() => undefined);
   }, [activePickKey, isRevealing]);
 
-  function updateState(nextState: PickerState) {
-    setState(nextState);
-  }
-
-  function resetPickedState(prizesOverride?: Prize[], eventCodeOverride = eventCode, shouldClearPicked = true) {
+  function resetPickedState() {
     clearRevealTimer();
-    if (resultTimerRef.current !== null) {
-      window.clearTimeout(resultTimerRef.current);
-      resultTimerRef.current = null;
-    }
-
-    if (shouldClearPicked) {
-      clearPickedCellIndexes(eventCodeOverride);
-    }
+    clearPickedCellIndexes(eventCode);
 
     const inventoryPrizes = prizesFromInventory(prizeInventory);
-    const nextPrizes =
-      prizesOverride ??
-      (prizeTotalOf(inventoryPrizes) === BOARD_CELL_COUNT ? inventoryPrizes : state.prizes);
-    const pickedCellIndexes = shouldClearPicked ? [] : readPickedCellIndexes(eventCodeOverride);
-    const remainingCount =
-      prizesOverride || prizeInventory.length === 0 ? prizeTotalOf(nextPrizes) : remainingTotalOf(prizeInventory);
-    const nextState = createDefaultState(nextPrizes, eventCodeOverride, pickedCellIndexes, remainingCount);
-    updateState(nextState);
+    const nextState =
+      prizeTotalOf(inventoryPrizes) === BOARD_CELL_COUNT
+        ? createPickerState(inventoryPrizes, eventCode, [], remainingTotalOf(prizeInventory))
+        : emptyPickerState(eventCode);
+
+    setState(nextState);
     setDrawError("");
     setSelectedResult(null);
     setActivePickKey(null);
@@ -303,8 +223,8 @@ export default function App() {
       return;
     }
 
-    if (isMockTestParticipant(nextParticipant)) {
-      openManagementPage(nextParticipant);
+    if (isAdminSpecialAccount(nextParticipant)) {
+      openAdminPage();
       return;
     }
 
@@ -361,23 +281,13 @@ export default function App() {
     }
   }
 
-  function openManagementPage(nextParticipant: ParticipantForm) {
-    setIsTestMode(true);
-    setParticipant({
-      leadId: "mock-lead-whatap-1111",
-      name: participantFormFullName(nextParticipant),
-      phoneLastFour: nextParticipant.phoneLastFour,
-      eventCode,
-      eventDate: selectedEventDate || todayDateString(),
-      company: "Mock Company",
-      jobLevel: "MOCK",
-      aiStatus: "DONE",
-      grade: "A",
-      score: 100,
-    });
+  function openAdminPage() {
+    setView("admin");
+    setParticipant(null);
     setParticipantError("");
     setLeadOptions([]);
     setDrawError("");
+    setSelectedResult(null);
   }
 
   function submitEventSelection(event: FormEvent<HTMLFormElement>) {
@@ -396,15 +306,15 @@ export default function App() {
     setEventCodeDraft(nextEventCode);
     rememberEventCode(nextEventCode);
     updateEventCodeInUrl(nextEventCode);
+    setState(emptyPickerState(nextEventCode));
     setPrizeInventory([]);
     setSelectedEventDate("");
     setPrizeError("");
     setParticipantError("");
     setDrawError("");
-    setParticipant((current) =>
-      current ? { ...current, eventCode: nextEventCode, eventDate: undefined } : current,
-    );
-    resetPickedState(defaultPrizes, nextEventCode, false);
+    setSelectedResult(null);
+    setActivePickKey(null);
+    setIsRevealing(false);
   }
 
   async function selectLeadOption(lead: LeadOption) {
@@ -427,6 +337,7 @@ export default function App() {
       grade: lead.grade,
       score: lead.score,
     });
+    setView("draw");
     setDrawError("");
   }
 
@@ -443,20 +354,12 @@ export default function App() {
   }
 
   function finishCycle() {
-    if (revealTimerRef.current !== null) {
-      window.clearTimeout(revealTimerRef.current);
-      revealTimerRef.current = null;
-    }
-    if (resultTimerRef.current !== null) {
-      window.clearTimeout(resultTimerRef.current);
-      resultTimerRef.current = null;
-    }
-
+    clearRevealTimer();
     setSelectedResult(null);
     setActivePickKey(null);
     setIsRevealing(false);
     setParticipant(null);
-    setIsTestMode(false);
+    setView("entry");
     setParticipantForm({
       lastName: "",
       firstName: "",
@@ -470,17 +373,6 @@ export default function App() {
   function showResult(result: PickResult) {
     setSelectedResult(result);
     setConfettiTrigger((prev) => prev + 1);
-
-    if (resultTimerRef.current !== null) {
-      window.clearTimeout(resultTimerRef.current);
-    }
-
-    if (result.isMock) {
-      resultTimerRef.current = window.setTimeout(() => {
-        resultTimerRef.current = null;
-        setSelectedResult(null);
-      }, RESULT_HOLD_DURATION_MS);
-    }
   }
 
   function clearRevealTimer() {
@@ -490,77 +382,9 @@ export default function App() {
     }
   }
 
-  function pickMockCell(index: number, currentParticipant: Participant, prizeOverride?: Prize) {
-    const cell = state.cells[index];
-    if (!cell || cell.picked || cell.empty || isRevealing) return;
-
-    const result: PickResult = {
-      id: `${cell.id}-mock`,
-      cellNumber: index + 1,
-      rank: prizeOverride?.rank ?? cell.rank,
-      name: prizeOverride?.name ?? cell.name,
-      pickedAt: new Date().toLocaleString("ko-KR"),
-      participantName: participantFullName(currentParticipant),
-      participantPhoneLastFour: currentParticipant.phoneLastFour,
-      isMock: true,
-    };
-    const nextCells = state.cells.map((item, cellIndex) =>
-      cellIndex === index
-        ? {
-            ...item,
-            picked: true,
-            rank: result.rank,
-            name: result.name,
-          }
-        : item,
-    );
-
-    rememberPickedCellIndex(currentParticipant.eventCode || eventCode, index);
-    setActivePickKey(cell.id);
-    setIsRevealing(true);
-    clearRevealTimer();
-
-    revealTimerRef.current = window.setTimeout(() => {
-      updateState({
-        ...state,
-        cells: nextCells,
-        results: [result, ...state.results],
-      });
-      showResult(result);
-      setIsRevealing(false);
-      setActivePickKey(null);
-      revealTimerRef.current = null;
-    }, PICK_REVEAL_DURATION_MS);
-  }
-
-  function selectMockPrize(prize: Prize) {
-    if (!participant || isRevealing) return;
-
-    const candidates = state.cells
-      .map((cell, index) => ({ cell, index }))
-      .filter(({ cell }) => !cell.picked && !cell.empty && cell.tone !== "white");
-    const fallbackCandidates = state.cells
-      .map((cell, index) => ({ cell, index }))
-      .filter(({ cell }) => !cell.picked && !cell.empty);
-    const pickableCells = candidates.length > 0 ? candidates : fallbackCandidates;
-
-    if (pickableCells.length === 0) {
-      setDrawError("선택 가능한 칸이 없습니다. 뽑기판을 초기화해 주세요.");
-      return;
-    }
-
-    const nextIndex = pickableCells[0].index;
-    pickMockCell(nextIndex, participant, prize);
-  }
-
   async function pickCell(index: number) {
     const cell = state.cells[index];
     if (!cell || cell.picked || cell.empty || isRevealing || !participant) return;
-
-    if (isTestMode) {
-      pickMockCell(index, participant);
-      return;
-    }
 
     if (!participant.leadId || !participant.eventCode) {
       setDrawError("참여자 정보가 올바르지 않습니다. 다시 검색해 주세요.");
@@ -587,7 +411,7 @@ export default function App() {
 
       rememberPickedCellIndex(participant.eventCode || eventCode, index);
       revealTimerRef.current = window.setTimeout(() => {
-        updateState({
+        setState({
           ...state,
           cells: nextCells,
           results: [result, ...state.results],
@@ -620,9 +444,8 @@ export default function App() {
       });
       const result = pickResultFromDrawResponse(response, cellId, cellNumber, currentParticipant);
 
-      updateState({
+      setState({
         ...state,
-        cells: state.cells,
         results: [result, ...state.results],
       });
       showResult(result);
@@ -644,40 +467,23 @@ export default function App() {
     isLoading: isLoadingPrizes,
     error: prizeError,
   });
-  const isManagementPatternEntered = isMockTestParticipant({
+  const isAdminSpecialAccountEntered = isAdminSpecialAccount({
     lastName: participantForm.lastName.trim(),
     firstName: participantForm.firstName.trim(),
     phoneLastFour: digitsOnly(participantForm.phoneLastFour).slice(0, 4),
   });
-  const canSubmitParticipant = !isCheckingParticipant && (Boolean(eventCode) || isManagementPatternEntered);
+  const canSubmitParticipant = !isCheckingParticipant && (Boolean(eventCode) || isAdminSpecialAccountEntered);
   const selectedAdminEventCode = adminEvents.some((item) => item.eventCode === eventCodeDraft.trim())
     ? eventCodeDraft.trim()
     : "";
   const canApplyEventSelection = !isLoadingEvents && Boolean(selectedAdminEventCode);
-  const mockTestPrizes = state.prizes.map((prize) => ({
-    ...prize,
-    name: `Mock ${prize.name}`,
-  }));
 
-  const resultOverlay = selectedResult ? (
-    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center">
-      <div className="flex select-none flex-col items-center gap-6 rounded-2xl px-10 py-8 text-center shadow-2xl" style={{ backgroundColor: "#1a4db5" }}>
-        <div className="text-[96px] font-black leading-none text-white sm:text-[132px]" data-testid="draw-result-rank">
-          {selectedResult.rank}
-        </div>
-        {!selectedResult.isMock && (
-          <button
-            type="button"
-            className="h-12 w-full rounded-lg bg-white px-10 text-base font-bold text-[#1a4db5] transition-colors hover:bg-white/90"
-            onClick={finishCycle}
-          >
-            확인
-          </button>
-        )}
-      </div>
-    </div>
-  ) : null;
-
+  const resultOverlay = (
+    <DrawResultOverlay
+      result={selectedResult}
+      onConfirm={finishCycle}
+    />
+  );
   const drawEffect = (
     <video
       ref={drawEffectRef}
@@ -692,683 +498,65 @@ export default function App() {
     />
   );
 
-  if (!participant) {
+  if (view === "admin") {
     return (
-      <main className="flex h-screen min-h-screen flex-col overflow-hidden bg-background px-5 pb-5 pt-4">
-        <header className="flex h-[92px] shrink-0 items-center justify-between gap-4">
-          <div className="w-[180px]" aria-hidden="true" />
-          <img
-            src="/WhaTap_basic_logo.png"
-            alt="WhaTap"
-            className="h-[48px] w-auto object-contain"
-          />
-          <div className="w-[180px]" aria-hidden="true" />
-        </header>
-
-        <section className="flex min-h-0 flex-1 items-center justify-center">
-          <form
-            className="w-full max-w-[420px] rounded-lg border bg-card p-6 shadow-sm"
-            onSubmit={submitParticipant}
-          >
-            <div className="mb-6">
-              <h1 className="text-2xl font-bold tracking-normal text-foreground">제출하신 설문 정보를 입력해 주세요.</h1>
-              {prizeStatus ? (
-                <p className="mt-2 text-sm font-medium text-muted-foreground">{prizeStatus}</p>
-              ) : null}
-            </div>
-
-            <div className="space-y-5">
-              <div className="grid gap-3 sm:grid-cols-[0.8fr_1.2fr]">
-                <div className="space-y-2">
-                  <Label htmlFor="participant-last-name">성</Label>
-                  <div className="relative">
-                    <UserRound
-                      className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                      aria-hidden="true"
-                    />
-                    <Input
-                      id="participant-last-name"
-                      value={participantForm.lastName}
-                      onChange={(event) => updateParticipantField("lastName", event.target.value)}
-                      placeholder="홍"
-                      className="h-12 pl-9 text-base"
-                      autoComplete="family-name"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="participant-first-name">이름</Label>
-                  <Input
-                    id="participant-first-name"
-                    value={participantForm.firstName}
-                    onChange={(event) => updateParticipantField("firstName", event.target.value)}
-                    placeholder="길동"
-                    className="h-12 text-base"
-                    autoComplete="given-name"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="participant-phone-last-four">전화번호 뒷자리</Label>
-                <div className="relative">
-                  <Phone
-                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                  <Input
-                    id="participant-phone-last-four"
-                    value={participantForm.phoneLastFour}
-                    onChange={(event) => updateParticipantField("phoneLastFour", event.target.value)}
-                    placeholder="1234"
-                    className="h-12 pl-9 text-base"
-                    inputMode="numeric"
-                    maxLength={4}
-                    autoComplete="tel"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {participantError ? (
-              <p className="mt-4 text-sm font-medium text-destructive">{participantError}</p>
-            ) : null}
-            {!eventCode && !isManagementPatternEntered ? (
-              <p className="mt-4 text-sm font-medium text-destructive">
-                행사를 먼저 선택해주세요.
-              </p>
-            ) : null}
-
-            {leadOptions.length > 0 ? (
-              <div className="mt-4 space-y-2">
-                {leadOptions.map((lead) => (
-                  <Button
-                    key={lead.leadId}
-                    type="button"
-                    variant="outline"
-                    className="h-auto w-full justify-between gap-3 px-4 py-3 text-left"
-                    onClick={() => void selectLeadOption(lead)}
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate font-semibold">{lead.name}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {lead.company} · {lead.jobLevel}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {lead.drawn ? "추첨 완료" : lead.grade ? `${lead.grade} · ${lead.score ?? "-"}점` : lead.aiStatus}
-                    </span>
-                  </Button>
-                ))}
-              </div>
-            ) : null}
-
-            <Button type="submit" className="mt-6 h-12 w-full gap-2 text-base" disabled={!canSubmitParticipant}>
-              {isCheckingParticipant ? "확인 중" : "이벤트 참여하기"}
-              <ArrowRight className="size-4" aria-hidden="true" />
-            </Button>
-          </form>
-        </section>
-      </main>
+      <AdminControlPage
+        cells={state.cells}
+        columns={BOARD_COLUMNS}
+        rows={BOARD_ROWS}
+        activePickKey={activePickKey}
+        isRevealing={isRevealing}
+        drawError={drawError}
+        drawEffect={drawEffect}
+        resultOverlay={resultOverlay}
+        confettiTrigger={confettiTrigger}
+        selectedEventStatus={selectedEventStatus}
+        adminEvents={adminEvents}
+        eventCodeDraft={eventCodeDraft}
+        selectedAdminEventCode={selectedAdminEventCode}
+        isLoadingEvents={isLoadingEvents}
+        eventListError={eventListError}
+        canApplyEventSelection={canApplyEventSelection}
+        onResetPickedState={resetPickedState}
+        onBackToEntry={finishCycle}
+        onEventCodeDraftChange={setEventCodeDraft}
+        onSubmitEventSelection={submitEventSelection}
+      />
     );
   }
 
-  if (isTestMode) {
+  if (view === "draw" && participant) {
     return (
-      <main className="flex h-screen min-h-screen flex-col overflow-hidden bg-background px-5 pb-5 pt-4">
-        <header className="flex h-[92px] shrink-0 items-center justify-between gap-4">
-          <div className="flex w-[180px] justify-start">
-            <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => resetPickedState()}>
-              <RotateCcw className="size-3.5" aria-hidden="true" />
-              초기화
-            </Button>
-          </div>
-          <img
-            src="/WhaTap_basic_logo.png"
-            alt="WhaTap"
-            className="h-[48px] w-auto object-contain"
-          />
-          <div className="flex w-[180px] justify-end">
-            <Badge variant="secondary" className="max-w-full truncate px-3 py-1 text-sm">
-              관리 모드
-            </Badge>
-          </div>
-        </header>
-
-        <section className="flex min-h-0 flex-1 flex-col gap-4">
-          <div className="min-h-0 flex-1 rounded-lg border bg-card p-4 shadow-sm">
-            <div className="relative h-full w-full overflow-hidden rounded-md">
-              <PickerCanvas
-                cells={state.cells}
-                columns={BOARD_COLUMNS}
-                rows={BOARD_ROWS}
-                activePickKey={activePickKey}
-                isRevealing={isRevealing}
-                onPick={() => undefined}
-              />
-              {drawError ? (
-                <div className="absolute left-4 top-4 z-20 max-w-[420px] rounded-md border border-destructive/30 bg-background/95 px-4 py-2 text-sm font-medium text-destructive shadow-sm">
-                  {drawError}
-                </div>
-              ) : null}
-              {drawEffect}
-              {resultOverlay}
-              <Confetti key={confettiTrigger} active={confettiTrigger > 0} />
-            </div>
-          </div>
-
-          <div className="shrink-0 rounded-lg border bg-card p-4 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <Badge className="mb-2 px-3 py-1 text-sm">뽑기판 관리</Badge>
-                <h1 className="text-xl font-bold tracking-normal text-foreground">이벤트 및 테스트 관리</h1>
-                <p className="mt-1 text-sm font-medium text-muted-foreground">
-                  현재 선택된 이벤트: {selectedEventStatus}
-                </p>
-              </div>
-              <Button type="button" variant="ghost" onClick={finishCycle}>
-                입력 폼으로 돌아가기
-              </Button>
-            </div>
-
-            <div className="grid gap-4 xl:grid-cols-[1.1fr_1.4fr]">
-              <div>
-                <div className="mb-2 text-sm font-semibold text-foreground">이벤트 선택</div>
-                <form className="space-y-2" onSubmit={submitEventSelection}>
-                  <select
-                    aria-label="이벤트 코드"
-                    value={selectedAdminEventCode}
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm font-medium"
-                    disabled={isRevealing || isLoadingEvents || adminEvents.length === 0}
-                    onChange={(event) => setEventCodeDraft(event.target.value)}
-                  >
-                    <option value="" disabled>
-                      {isLoadingEvents ? "이벤트 불러오는 중" : "이벤트 선택"}
-                    </option>
-                    {adminEvents.map((item) => (
-                      <option key={item.eventCode} value={item.eventCode}>
-                        {eventOptionLabel(item)}
-                      </option>
-                    ))}
-                  </select>
-                  {eventListError ? (
-                    <p className="text-sm font-medium text-destructive">{eventListError}</p>
-                  ) : !isLoadingEvents && adminEvents.length === 0 ? (
-                    <p className="text-sm font-medium text-muted-foreground">등록된 이벤트가 없습니다.</p>
-                  ) : null}
-                  <Button type="submit" className="h-10 w-full" disabled={isRevealing || !canApplyEventSelection}>
-                    이벤트 적용
-                  </Button>
-                </form>
-              </div>
-
-              <div>
-                <div className="mb-2 text-sm font-semibold text-foreground">등수 선택</div>
-                <div className="grid grid-cols-5 gap-2">
-                  {mockTestPrizes.map((prize) => (
-                    <Button
-                      key={prize.rank}
-                      type="button"
-                      variant="outline"
-                      className="h-20 flex-col gap-1 px-2 text-center"
-                      disabled={isRevealing}
-                      onClick={() => selectMockPrize(prize)}
-                    >
-                      <CheckCircle2 className="size-4 text-primary" aria-hidden="true" />
-                      <span className="text-lg font-bold">{prize.rank}</span>
-                      <span className="max-w-full truncate text-xs font-medium text-muted-foreground">
-                        {prize.name}
-                      </span>
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-      </main>
+      <DrawBoardPage
+        participant={participant}
+        cells={state.cells}
+        columns={BOARD_COLUMNS}
+        rows={BOARD_ROWS}
+        activePickKey={activePickKey}
+        isRevealing={isRevealing}
+        drawError={drawError}
+        prizeStatus={prizeStatus}
+        drawEffect={drawEffect}
+        resultOverlay={resultOverlay}
+        confettiTrigger={confettiTrigger}
+        onPick={pickCell}
+      />
     );
   }
 
   return (
-    <main className="flex h-screen min-h-screen flex-col overflow-hidden bg-background px-5 pb-5 pt-4">
-      <header className="flex h-[92px] shrink-0 items-center justify-between gap-4">
-        <div className="flex w-[180px] items-center justify-start gap-2">
-          {prizeStatus ? (
-            <Badge variant="outline" className="max-w-full truncate px-3 py-1 text-sm">
-              {prizeStatus}
-            </Badge>
-          ) : null}
-        </div>
-        <img
-          src="/WhaTap_basic_logo.png"
-          alt="WhaTap"
-          className="h-[48px] w-auto object-contain"
-        />
-        <div className="flex w-[180px] justify-end">
-          <Badge variant="secondary" className="max-w-full truncate px-3 py-1 text-sm">
-            {isTestMode ? "Mock · " : ""}
-            {participantFullName(participant)} · {participant.phoneLastFour}
-          </Badge>
-        </div>
-      </header>
-
-      <section className="min-h-0 flex-1 rounded-lg border bg-card p-4 shadow-sm">
-        <div className="relative h-full w-full overflow-hidden rounded-md">
-          <PickerCanvas
-            cells={state.cells}
-            columns={BOARD_COLUMNS}
-            rows={BOARD_ROWS}
-            activePickKey={activePickKey}
-            isRevealing={isRevealing}
-            onPick={pickCell}
-          />
-          {drawError ? (
-            <div className="absolute left-4 top-4 z-20 max-w-[420px] rounded-md border border-destructive/30 bg-background/95 px-4 py-2 text-sm font-medium text-destructive shadow-sm">
-              {drawError}
-            </div>
-          ) : null}
-          {drawEffect}
-          {resultOverlay}
-          <Confetti key={confettiTrigger} active={confettiTrigger > 0} />
-        </div>
-      </section>
-    </main>
+    <ParticipantEntryPage
+      participantForm={participantForm}
+      participantError={participantError}
+      prizeStatus={prizeStatus}
+      eventCode={eventCode}
+      isAdminSpecialAccountEntered={isAdminSpecialAccountEntered}
+      leadOptions={leadOptions}
+      isCheckingParticipant={isCheckingParticipant}
+      canSubmitParticipant={canSubmitParticipant}
+      onSubmit={submitParticipant}
+      onParticipantFieldChange={updateParticipantField}
+      onSelectLead={(lead) => void selectLeadOption(lead)}
+    />
   );
-}
-
-function isMockTestParticipant(participant: ParticipantForm) {
-  return (
-    participantFormFullName(participant).toLowerCase() === TEST_PARTICIPANT_NAME &&
-    participant.phoneLastFour === TEST_PARTICIPANT_PHONE_LAST_FOUR
-  );
-}
-
-function participantFullName(participant: Participant) {
-  return participant.name;
-}
-
-function participantFormFullName(participant: ParticipantForm) {
-  return `${participant.lastName}${participant.firstName}`;
-}
-
-function pickResultFromDrawResponse(
-  response: DrawResponse,
-  cellId: string,
-  cellNumber: number,
-  participant: Participant,
-): PickResult {
-  const isOutOfStock = response.outOfStock === true || response.rank === null;
-
-  return {
-    id: `${cellId}-${response.drawnAt}`,
-    cellNumber,
-    rank: isOutOfStock ? "꽝" : `${response.rank}등`,
-    name: response.prizeName || "경품 소진",
-    pickedAt: formatDateTime(response.drawnAt),
-    participantName: participantFullName(participant),
-    participantPhoneLastFour: participant.phoneLastFour,
-  };
-}
-
-function drawResponseLabel(response: DrawResponse) {
-  if (response.outOfStock || response.rank === null) {
-    return "꽝";
-  }
-
-  return `${response.rank}등 · ${response.prizeName || "경품"}`;
-}
-
-function prizeInventoryStatus(prizes: ApiPrize[], isLoading: boolean, error: string) {
-  if (isLoading) return "재고 확인 중";
-  if (error) return error;
-  if (prizes.length === 0) return "";
-
-  const initial = prizes.reduce((sum, prize) => sum + safeCount(prize.initial), 0);
-  const remaining = prizes.reduce((sum, prize) => sum + safeCount(prize.remaining), 0);
-  return `잔여 ${remaining}/${initial}`;
-}
-
-function eventStatusLabel({
-  eventCode,
-  eventDate,
-  prizeStatus,
-  isLoading,
-  error,
-}: {
-  eventCode: string;
-  eventDate: string;
-  prizeStatus: string;
-  isLoading: boolean;
-  error: string;
-}) {
-  if (!eventCode) return "미선택";
-
-  const parts = [eventCode];
-  if (eventDate) {
-    parts.push(eventDate);
-  }
-  if (prizeStatus) {
-    parts.push(prizeStatus);
-  } else if (!isLoading && !error && eventDate) {
-    parts.push("등록된 재고 없음");
-  }
-
-  return parts.join(" · ");
-}
-
-function apiErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof DrawApiError) {
-    return error.message;
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return fallback;
-}
-
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("ko-KR");
-}
-
-function readEventCode() {
-  if (typeof window === "undefined") return "";
-
-  const queryEventCode = new URLSearchParams(window.location.search).get("eventCode")?.trim();
-  if (queryEventCode) return queryEventCode;
-
-  const pathSegments = window.location.pathname.split("/").filter(Boolean);
-  const eventSegmentIndex = pathSegments.indexOf("event");
-  const pathEventCode = eventSegmentIndex >= 0 ? pathSegments[eventSegmentIndex + 1] : "";
-  if (pathEventCode) return decodeEventCode(pathEventCode);
-
-  return localStorage.getItem(EVENT_CODE_STORAGE_KEY)?.trim() || "";
-}
-
-function decodeEventCode(value: string) {
-  try {
-    return decodeURIComponent(value).trim();
-  } catch {
-    return value.trim();
-  }
-}
-
-function rememberEventCode(eventCode: string) {
-  if (typeof window === "undefined") return;
-
-  localStorage.setItem(EVENT_CODE_STORAGE_KEY, eventCode);
-}
-
-function eventOptionLabel(event: ApiEvent) {
-  return [event.eventCode, event.label, event.eventDate, event.status].filter(Boolean).join(" · ");
-}
-
-function updateEventCodeInUrl(eventCode: string) {
-  if (typeof window === "undefined") return;
-
-  const url = new URL(window.location.href);
-  const pathSegments = url.pathname.split("/").filter(Boolean);
-  if (pathSegments[0] === "event") {
-    url.pathname = `/event/${encodeURIComponent(eventCode)}`;
-    url.searchParams.delete("eventCode");
-  } else {
-    url.searchParams.set("eventCode", eventCode);
-  }
-
-  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-}
-
-function todayDateString() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function digitsOnly(value: string) {
-  return value.replace(/\D/g, "");
-}
-
-function loadState(): PickerState {
-  return createDefaultState();
-}
-
-function normalizePrizes(prizes: Prize[]) {
-  const list = Array.isArray(prizes) && prizes.length > 0 ? prizes : defaultPrizes;
-  return list
-    .map((prize, index) => ({
-      rank: String(prize.rank || `${index + 1}등`).trim(),
-      name: String(prize.name || "경품").trim(),
-      count: safeCount(prize.count),
-    }))
-    .filter((prize) => prize.name && prize.count > 0);
-}
-
-function prizesFromInventory(prizes: ApiPrize[]) {
-  if (!Array.isArray(prizes)) return [];
-
-  return prizes
-    .map((prize, index) => {
-      const rank = Math.max(1, Number(prize.rank) || index + 1);
-
-      return {
-        rank: `${rank}등`,
-        name: String(prize.name || "경품").trim(),
-        count: safeCount(prize.initial),
-      };
-    })
-    .filter((prize) => prize.name && prize.count > 0);
-}
-
-function safeCount(value: number) {
-  return Math.max(0, Number(value) || 0);
-}
-
-function prizeTotalOf(prizes: Prize[]) {
-  return prizes.reduce((sum, prize) => sum + safeCount(prize.count), 0);
-}
-
-function remainingTotalOf(prizes: ApiPrize[]) {
-  return prizes.reduce((sum, prize) => sum + safeCount(prize.remaining), 0);
-}
-
-function buildCells(prizes: Prize[]): PickerCell[] {
-  const normalizedPrizes = normalizePrizes(prizes);
-  const assignedPrizes: Array<{ prizeIndex: number; rank: string; name: string } | undefined> =
-    Array.from({ length: BOARD_CELL_COUNT });
-  const prizeOrder = deterministicIndexOrder("prize-layout");
-  let orderIndex = 0;
-
-  normalizedPrizes.forEach((prize, prizeIndex) => {
-    for (let count = 0; count < prize.count && orderIndex < BOARD_CELL_COUNT; count += 1) {
-      assignedPrizes[prizeOrder[orderIndex]] = {
-        prizeIndex,
-        rank: prize.rank,
-        name: prize.name,
-      };
-      orderIndex += 1;
-    }
-  });
-
-  const fallbackPrize = {
-    prizeIndex: 0,
-    rank: normalizedPrizes[0]?.rank ?? "1등",
-    name: normalizedPrizes[0]?.name ?? "경품",
-  };
-  const tones = buildTonePattern();
-
-  return assignedPrizes.map((prize, index) => ({
-    id: `cell-${index}`,
-    picked: false,
-    empty: false,
-    tone: tones[index],
-    ...(prize ?? fallbackPrize),
-  }));
-}
-
-function buildTonePattern(): CellTone[] {
-  const columnHeights = Array.from({ length: BOARD_COLUMNS }, (_, column) => {
-    const wave = Math.sin(column * 0.41) * 1.25 + Math.cos(column * 0.23) * 0.95;
-    const spike =
-      spikeWeight(column, 3) * 3.8 +
-      spikeWeight(column, 18) * 2.7 +
-      spikeWeight(column, 39) * 3.5 +
-      spikeWeight(column, 45) * 2.8;
-    const jitter = deterministicNumber(`height:${column}`) * 1.8;
-    return Math.max(3, Math.min(BOARD_ROWS, Math.round(4.4 + wave + spike + jitter)));
-  });
-
-  return Array.from({ length: BOARD_CELL_COUNT }, (_, index) => {
-    const column = index % BOARD_COLUMNS;
-    const row = Math.floor(index / BOARD_COLUMNS);
-    const rowFromBottom = BOARD_ROWS - 1 - row;
-    const height = columnHeights[column];
-
-    if (rowFromBottom >= height) {
-      if (rowFromBottom === height && deterministicNumber(`edge:${index}`) < 0.14) {
-        return deterministicNumber(`edge-tone:${index}`) < 0.72 ? "blue" : "yellow";
-      }
-      if (rowFromBottom >= BOARD_ROWS - 2 && deterministicNumber(`outlier:${index}`) < 0.018) return "blue";
-      return "white";
-    }
-
-    if (rowFromBottom > 1 && deterministicNumber(`inner-gap:${index}`) < 0.08) return "white";
-    if (rowFromBottom === 0) {
-      return deterministicNumber(`base:${index}`) < 0.78
-        ? "red"
-        : deterministicNumber(`base-alt:${index}`) < 0.62 ? "yellow" : "blue";
-    }
-    if (rowFromBottom === 1 && deterministicNumber(`row-one:${index}`) < 0.16) return "red";
-    if (rowFromBottom <= 3) return deterministicNumber(`low:${index}`) < 0.5 ? "yellow" : "blue";
-    return deterministicNumber(`high:${index}`) < 0.78 ? "blue" : "yellow";
-  });
-}
-
-function spikeWeight(column: number, center: number) {
-  return Math.max(0, 1 - Math.abs(column - center) / 3);
-}
-
-function applyPickedAndStockLimit(
-  cells: PickerCell[],
-  eventCode: string,
-  pickedCellIndexes: number[],
-  remainingCount: number,
-) {
-  const pickedSet = new Set(normalizePickedCellIndexes(pickedCellIndexes));
-  const cellsWithPicked = cells.map((cell, index) => ({
-    ...cell,
-    picked: pickedSet.has(index),
-    empty: false,
-  }));
-  const unpickedCount = cellsWithPicked.reduce((sum, cell) => sum + (cell.picked ? 0 : 1), 0);
-  const boundedRemainingCount = Math.min(BOARD_CELL_COUNT, safeCount(remainingCount));
-  const emptyCount = Math.max(0, unpickedCount - boundedRemainingCount);
-
-  if (emptyCount === 0) return cellsWithPicked;
-
-  const emptyIndexes = new Set(
-    deterministicIndexOrder(`empty:${eventCode || "default"}`)
-      .filter((index) => !pickedSet.has(index))
-      .slice(0, emptyCount),
-  );
-
-  return cellsWithPicked.map((cell, index) =>
-    emptyIndexes.has(index) ? { ...cell, empty: true, tone: "white" as CellTone } : cell,
-  );
-}
-
-function readPickedCellIndexes(eventCode: string) {
-  if (!eventCode) return [];
-  return readPickedCellsByEvent()[eventCode] ?? [];
-}
-
-function rememberPickedCellIndex(eventCode: string | undefined, index: number) {
-  if (!eventCode) return;
-
-  const current = readPickedCellsByEvent();
-  writePickedCellsByEvent({
-    ...current,
-    [eventCode]: normalizePickedCellIndexes([...(current[eventCode] ?? []), index]),
-  });
-}
-
-function clearPickedCellIndexes(eventCode: string) {
-  if (!eventCode) return;
-
-  const current = readPickedCellsByEvent();
-  const next = { ...current };
-  delete next[eventCode];
-  writePickedCellsByEvent(next);
-}
-
-function readPickedCellsByEvent(): PickedCellsByEvent {
-  if (typeof window === "undefined") return {};
-
-  const saved = localStorage.getItem(PICKED_CELLS_STORAGE_KEY);
-  if (!saved) return {};
-
-  try {
-    const parsed = JSON.parse(saved) as unknown;
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
-      writePickedCellsByEvent({});
-      return {};
-    }
-
-    const record = parsed as Record<string, unknown>;
-    if ("cells" in record || "prizes" in record || "results" in record) {
-      writePickedCellsByEvent({});
-      return {};
-    }
-
-    return Object.fromEntries(
-      Object.entries(record)
-        .map(([key, value]) => [key, normalizePickedCellIndexes(value)] as const)
-        .filter(([key, value]) => key.trim() && value.length > 0),
-    );
-  } catch {
-    writePickedCellsByEvent({});
-    return {};
-  }
-}
-
-function writePickedCellsByEvent(store: PickedCellsByEvent) {
-  if (typeof window === "undefined") return;
-
-  const normalized = Object.fromEntries(
-    Object.entries(store)
-      .map(([key, value]) => [key, normalizePickedCellIndexes(value)] as const)
-      .filter(([key, value]) => key.trim() && value.length > 0),
-  );
-  localStorage.setItem(PICKED_CELLS_STORAGE_KEY, JSON.stringify(normalized));
-}
-
-function normalizePickedCellIndexes(value: unknown) {
-  if (!Array.isArray(value)) return [];
-
-  return Array.from(
-    new Set(
-      value
-        .map((item) => Number(item))
-        .filter((item) => Number.isInteger(item) && item >= 0 && item < BOARD_CELL_COUNT),
-    ),
-  ).sort((a, b) => a - b);
-}
-
-function deterministicIndexOrder(seed: string) {
-  return Array.from({ length: BOARD_CELL_COUNT }, (_, index) => index).sort((left, right) => {
-    const leftWeight = deterministicNumber(`${seed}:${left}`);
-    const rightWeight = deterministicNumber(`${seed}:${right}`);
-    return leftWeight === rightWeight ? left - right : leftWeight - rightWeight;
-  });
-}
-
-function deterministicNumber(seed: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash ^= seed.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0) / 0x100000000;
 }

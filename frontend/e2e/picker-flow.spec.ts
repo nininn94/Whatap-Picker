@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const STORAGE_KEY = "whatap-picker-display-v8";
 
-async function mockPrizeInventory(page: Page) {
+async function routePrizeInventory(page: Page) {
   await page.route("**/api/events", async (route) => {
     await route.fulfill({
       status: 200,
@@ -39,7 +39,7 @@ async function mockPrizeInventory(page: Page) {
 }
 
 test("validates participant fields before search", async ({ page }) => {
-  await mockPrizeInventory(page);
+  await routePrizeInventory(page);
   await page.goto("/?eventCode=event-1");
 
   await page.getByRole("button", { name: /이벤트 참여하기/ }).click();
@@ -48,7 +48,7 @@ test("validates participant fields before search", async ({ page }) => {
 });
 
 test("moves a matched lead into the draw board", async ({ page }) => {
-  await mockPrizeInventory(page);
+  await routePrizeInventory(page);
   await page.route("**/api/leads/search?**", async (route) => {
     await route.fulfill({
       status: 200,
@@ -86,8 +86,8 @@ test("moves a matched lead into the draw board", async ({ page }) => {
   await expect(page.getByRole("img", { name: /500칸 뽑기 차트/ })).toBeVisible();
 });
 
-test("runs a full mock draw cycle for the test participant", async ({ page }) => {
-  await mockPrizeInventory(page);
+test("opens admin management for the special account", async ({ page }) => {
+  await routePrizeInventory(page);
   await page.goto("/?eventCode=event-1");
 
   await page.getByLabel("성").fill("wha");
@@ -95,26 +95,16 @@ test("runs a full mock draw cycle for the test participant", async ({ page }) =>
   await page.getByLabel("전화번호 뒷자리").fill("1111");
   await page.getByRole("button", { name: /이벤트 참여하기/ }).click();
 
-  await expect(page.getByText("이벤트 및 테스트 관리")).toBeVisible();
+  await expect(page.getByText("이벤트 및 뽑기판 관리")).toBeVisible();
   await expect(page.getByText(/현재 선택된 이벤트: event-1/)).toBeVisible();
-  await page.getByRole("button", { name: /3등.*Mock 스티커팩/ }).click();
-
-  await expect(page.getByTestId("draw-result-rank")).toBeVisible({ timeout: 5_000 });
-  await expect
-    .poll(async () =>
-      page.evaluate((key) => {
-        const stored = localStorage.getItem(key);
-        return stored ? (JSON.parse(stored)["event-1"]?.length ?? 0) : 0;
-      }, STORAGE_KEY),
-    )
-    .toBe(1);
+  await expect(page.getByRole("img", { name: /500칸 뽑기 차트/ })).toBeVisible();
   await expect
     .poll(async () => page.evaluate((key) => localStorage.getItem(key) || "", STORAGE_KEY))
     .not.toContain("\"cells\"");
 });
 
 test("resets locally saved picked cells", async ({ page }) => {
-  await mockPrizeInventory(page);
+  await routePrizeInventory(page);
   await page.goto("/?eventCode=event-1");
   await page.evaluate(() => {
     localStorage.setItem(
