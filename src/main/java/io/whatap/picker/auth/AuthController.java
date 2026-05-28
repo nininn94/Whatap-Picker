@@ -26,26 +26,28 @@ public class AuthController {
                                HttpServletRequest httpRequest,
                                HttpServletResponse httpResponse) {
         LoginResponse body = authService.login(request, ClientIp.of(httpRequest));
-        ResponseCookie cookie = ResponseCookie.from(JwtAuthenticationFilter.COOKIE_NAME, body.accessToken())
-                .httpOnly(true)
-                .secure(httpRequest.isSecure())
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(body.expiresIn())
-                .build();
-        httpResponse.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+        httpResponse.addHeader(HttpHeaders.SET_COOKIE,
+                buildCookie(body.accessToken(), body.expiresIn(), httpRequest).toString());
         return body;
     }
 
     @PostMapping("/logout")
     public void logout(HttpServletRequest req, HttpServletResponse res) {
-        ResponseCookie cookie = ResponseCookie.from(JwtAuthenticationFilter.COOKIE_NAME, "")
+        res.addHeader(HttpHeaders.SET_COOKIE, buildCookie("", 0, req).toString());
+    }
+
+    /**
+     * HTTPS 요청이면 SameSite=None+Secure (cross-origin 호환, Vercel↔백엔드),
+     * HTTP 요청이면 SameSite=Lax (로컬 개발).
+     */
+    private static ResponseCookie buildCookie(String value, long maxAgeSeconds, HttpServletRequest req) {
+        boolean secure = req.isSecure();
+        return ResponseCookie.from(JwtAuthenticationFilter.COOKIE_NAME, value)
                 .httpOnly(true)
-                .secure(req.isSecure())
-                .sameSite("Lax")
+                .secure(secure)
+                .sameSite(secure ? "None" : "Lax")
                 .path("/")
-                .maxAge(0)
+                .maxAge(maxAgeSeconds)
                 .build();
-        res.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
     }
 }
