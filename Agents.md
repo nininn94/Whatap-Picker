@@ -29,6 +29,7 @@ Whatap Picker는 오프라인 부스 리드 모객을 위한 QR 기반 이벤트
 
 ## 작업 기준
 
+- 모든 작업 내용은 작은 단위로 나누고, 각 단위가 완료되면 `main` 브랜치에 푸시하면서 진행합니다.
 - 새 구현은 [`ai-coding-scenarios.md`](./ai-coding-scenarios.md)의 시나리오와 완료 기준을 우선 확인합니다.
 - 실제 API, 데이터 모델, 기술 스택을 확정해야 할 때만 [`backend-development-plan.md`](./backend-development-plan.md)를 참고합니다.
 - 서비스 목적, MVP 범위, 운영 정책은 [`ai-hackathon-lead-draw-plan.md`](./ai-hackathon-lead-draw-plan.md)를 기준으로 해석합니다.

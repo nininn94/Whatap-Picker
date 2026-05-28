@@ -63,7 +63,7 @@ test("moves a matched lead into the draw board", async ({ page }) => {
   await expect(page.getByRole("img", { name: /500칸 뽑기 차트/ })).toBeVisible();
 });
 
-test("shows a mock draw result for the test participant", async ({ page }) => {
+test("runs a full mock draw cycle for the test participant", async ({ page }) => {
   await mockPrizeInventory(page);
   await page.goto("/?eventCode=event-1");
 
@@ -72,8 +72,41 @@ test("shows a mock draw result for the test participant", async ({ page }) => {
   await page.getByLabel("전화번호 뒷자리").fill("1111");
   await page.getByRole("button", { name: /이벤트 참여하기/ }).click();
 
-  await expect(page.getByText("테스트 등수 선택")).toBeVisible();
-  await page.getByRole("button", { name: /3등.*Mock 스티커팩/ }).click();
+  await expect(page.getByText("Mock · whatap · 1111")).toBeVisible();
+  await page.getByRole("img", { name: /500칸 뽑기 차트/ }).click({ position: { x: 120, y: 120 } });
 
-  await expect(page.getByTestId("draw-result-rank")).toHaveText("3등", { timeout: 5_000 });
+  await expect(page.getByTestId("draw-result-rank")).toBeVisible({ timeout: 5_000 });
+  await expect
+    .poll(async () => page.evaluate(() => localStorage.getItem("whatap-picker-display-v8")))
+    .toContain("\"picked\":true");
+});
+
+test("resets locally saved picked cells", async ({ page }) => {
+  await mockPrizeInventory(page);
+  await page.goto("/?eventCode=event-1");
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "whatap-picker-display-v8",
+      JSON.stringify({
+        eventTitle: "Whatap 경품 뽑기",
+        prizes: [
+          { rank: "1등", name: "프리미엄 굿즈", count: 500 },
+        ],
+        cells: Array.from({ length: 500 }, (_, index) => ({
+          id: `cell-${index}`,
+          rank: "1등",
+          name: "프리미엄 굿즈",
+          prizeIndex: 0,
+          tone: "blue",
+          picked: index === 0,
+        })),
+        results: [{ id: "result-1", cellNumber: 1, rank: "1등", name: "프리미엄 굿즈", pickedAt: "now" }],
+      }),
+    );
+  });
+  await expect(page.getByRole("button", { name: /초기화/ })).toBeEnabled();
+
+  await page.getByRole("button", { name: /초기화/ }).click();
+
+  await expect.poll(async () => page.evaluate(() => localStorage.getItem("whatap-picker-display-v8"))).toBeNull();
 });

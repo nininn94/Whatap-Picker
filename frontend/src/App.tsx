@@ -518,12 +518,19 @@ export default function App() {
   if (!participant) {
     return (
       <main className="flex h-screen min-h-screen flex-col overflow-hidden bg-background px-5 pb-5 pt-4">
-        <header className="flex h-[92px] shrink-0 items-center justify-center">
+        <header className="flex h-[92px] shrink-0 items-center justify-between gap-4">
+          <div className="w-[180px]" aria-hidden="true" />
           <img
             src="/WhaTap_basic_logo.png"
             alt="WhaTap"
             className="h-[48px] w-auto object-contain"
           />
+          <div className="flex w-[180px] justify-end">
+            <Button type="button" variant="outline" size="sm" className="gap-2" onClick={resetPickedState}>
+              <RotateCcw className="size-3.5" aria-hidden="true" />
+              초기화
+            </Button>
+          </div>
         </header>
 
         <section className="flex min-h-0 flex-1 items-center justify-center">
@@ -643,79 +650,14 @@ export default function App() {
     );
   }
 
-  if (isTestMode) {
-    return (
-      <main className="flex h-screen min-h-screen flex-col overflow-hidden bg-background px-5 pb-5 pt-4">
-        <header className="flex h-[92px] shrink-0 items-center justify-between gap-4">
-          <div className="w-[180px]" aria-hidden="true" />
-          <img
-            src="/WhaTap_basic_logo.png"
-            alt="WhaTap"
-            className="h-[48px] w-auto object-contain"
-          />
-          <div className="flex w-[180px] justify-end">
-            <Badge variant="secondary" className="max-w-full truncate px-3 py-1 text-sm">
-              Mock · {participantFullName(participant)}
-            </Badge>
-          </div>
-        </header>
-
-        <section className="flex min-h-0 flex-1 flex-col gap-4">
-          <div className="min-h-0 flex-1 rounded-lg border bg-card p-4 shadow-sm">
-            <div className="relative h-full w-full overflow-hidden rounded-md">
-              <PickerCanvas
-                cells={state.cells}
-                columns={BOARD_COLUMNS}
-                rows={BOARD_ROWS}
-                activePickKey={null}
-                isRevealing={isRevealing}
-                onPick={() => undefined}
-              />
-              {drawEffect}
-              {resultOverlay}
-              <Confetti key={confettiTrigger} active={confettiTrigger > 0} />
-            </div>
-          </div>
-
-          <div className="shrink-0 rounded-lg border bg-card p-4 shadow-sm">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <Badge className="mb-2 px-3 py-1 text-sm">뽑기 테스트</Badge>
-                <h1 className="text-xl font-bold tracking-normal text-foreground">테스트 등수 선택</h1>
-              </div>
-              <Button type="button" variant="ghost" onClick={finishCycle}>
-                입력 폼으로 돌아가기
-              </Button>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-5">
-              {mockTestPrizes.map((prize) => (
-                <Button
-                  key={prize.rank}
-                  type="button"
-                  variant="outline"
-                  className="h-20 flex-col gap-1 px-3 text-center"
-                  disabled={isRevealing}
-                  onClick={() => selectMockPrize(prize)}
-                >
-                  <CheckCircle2 className="size-5 text-primary" aria-hidden="true" />
-                  <span className="text-xl font-bold">{prize.rank}</span>
-                  <span className="max-w-full truncate text-xs font-medium text-muted-foreground">
-                    {prize.name}
-                  </span>
-                </Button>
-              ))}
-            </div>
-          </div>
-        </section>
-      </main>
-    );
-  }
-
   return (
     <main className="flex h-screen min-h-screen flex-col overflow-hidden bg-background px-5 pb-5 pt-4">
       <header className="flex h-[92px] shrink-0 items-center justify-between gap-4">
-        <div className="flex w-[180px] justify-start">
+        <div className="flex w-[180px] items-center justify-start gap-2">
+          <Button type="button" variant="outline" size="sm" className="gap-2" onClick={resetPickedState}>
+            <RotateCcw className="size-3.5" aria-hidden="true" />
+            초기화
+          </Button>
           {prizeStatus ? (
             <Badge variant="outline" className="max-w-full truncate px-3 py-1 text-sm">
               {prizeStatus}
@@ -729,6 +671,7 @@ export default function App() {
         />
         <div className="flex w-[180px] justify-end">
           <Badge variant="secondary" className="max-w-full truncate px-3 py-1 text-sm">
+            {isTestMode ? "Mock · " : ""}
             {participantFullName(participant)} · {participant.phoneLastFour}
           </Badge>
         </div>
@@ -740,7 +683,7 @@ export default function App() {
             cells={state.cells}
             columns={BOARD_COLUMNS}
             rows={BOARD_ROWS}
-            activePickKey={null}
+            activePickKey={activePickKey}
             isRevealing={isRevealing}
             onPick={pickCell}
           />
@@ -833,31 +776,36 @@ function readEventCode() {
   return new URLSearchParams(window.location.search).get("eventCode")?.trim() || "";
 }
 
+function todayDateString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function digitsOnly(value: string) {
   return value.replace(/\D/g, "");
 }
 
 function loadState(): PickerState {
-  if (typeof window === "undefined") return defaultState;
+  const fallbackState = createDefaultState();
+  if (typeof window === "undefined") return fallbackState;
 
   const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) return defaultState;
+  if (!saved) return fallbackState;
 
   try {
     const parsed = JSON.parse(saved) as PickerState;
     const prizes = normalizePrizes(parsed.prizes);
     if (prizeTotalOf(prizes) !== BOARD_CELL_COUNT || parsed.cells?.length !== BOARD_CELL_COUNT) {
-      return defaultState;
+      return fallbackState;
     }
 
     return {
-      eventTitle: parsed.eventTitle || defaultState.eventTitle,
+      eventTitle: parsed.eventTitle || fallbackState.eventTitle,
       prizes,
       cells: parsed.cells,
       results: Array.isArray(parsed.results) ? parsed.results : [],
     };
   } catch {
-    return defaultState;
+    return fallbackState;
   }
 }
 

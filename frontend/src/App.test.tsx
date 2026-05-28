@@ -32,7 +32,7 @@ describe("App participant form", () => {
     expect(screen.getByText("고객 성, 이름과 전화번호 뒷자리 4자리를 입력해주세요.")).toBeInTheDocument();
   });
 
-  it("opens the mock prize selection flow for the test participant", async () => {
+  it("opens the draw board for the test participant", async () => {
     const user = userEvent.setup();
     renderAppWithEventCode();
 
@@ -41,7 +41,7 @@ describe("App participant form", () => {
     await user.type(screen.getByLabelText("전화번호 뒷자리"), "1111");
     await user.click(screen.getByRole("button", { name: /이벤트 참여하기/ }));
 
-    expect(await screen.findByText("테스트 등수 선택")).toBeInTheDocument();
-    expect(screen.getByText("Mock · whatap")).toBeInTheDocument();
+    expect(await screen.findByText("Mock · whatap · 1111")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /500칸 뽑기 차트/ })).toBeInTheDocument();
   });
 });
