@@ -38,7 +38,10 @@ const adminApi = (() => {
             return handle(await fetch(path, { method:'DELETE', credentials:'same-origin', headers: headers() }));
         },
         async download(path, filename) {
-            const res = await fetch(path, { credentials:'same-origin', headers: headers() });
+            // 다운로드는 text/csv 등 임의 컨텐츠 타입을 받아야 하므로 Accept: */*.
+            const h = { 'Accept': '*/*' };
+            if (token()) h['Authorization'] = 'Bearer ' + token();
+            const res = await fetch(path, { credentials:'same-origin', headers: h });
             if (!res.ok) throw new Error(`다운로드 실패 (${res.status})`);
             const cd = res.headers.get('Content-Disposition') || '';
             const m = cd.match(/filename="(.+?)"/);
