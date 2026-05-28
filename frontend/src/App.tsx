@@ -281,11 +281,8 @@ export default function App() {
   const resultOverlay = selectedResult ? (
     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center">
       <div className="select-none rounded-2xl px-10 py-8 text-center shadow-2xl flex flex-col items-center gap-6" style={{ backgroundColor: "#1a4db5" }}>
-        <div>
-          <div className="text-[96px] font-black leading-none text-white sm:text-[132px]">
-            {selectedResult.rank}
-          </div>
-          <div className="mt-2 text-lg font-semibold text-white/80">{selectedResult.name}</div>
+        <div className="text-[96px] font-black leading-none text-white sm:text-[132px]">
+          {selectedResult.rank}
         </div>
         {!selectedResult.isMock && (
           <button
