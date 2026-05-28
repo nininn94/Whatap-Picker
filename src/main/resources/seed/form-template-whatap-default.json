@@ -15,7 +15,7 @@
           "validation": "COMPANY_EMAIL_IF_NOT_STUDENT_FREELANCER" },
         { "key": "phone",     "type": "PHONE", "label": "핸드폰 번호", "required": true,
           "pattern": "^010[1-9]\\d{7}$",
-          "helper": "경품 발송을 위해 정확히 적어주세요. (010 + 8자리, 010 뒤 첫 자리는 0이 될 수 없습니다.)" },
+          "helper": "010을 포함하여 숫자만 기입해 주세요." },
         { "key": "industry",           "type": "SELECT", "label": "산업군",   "required": true, "optionsRef": "INDUSTRY" },
         { "key": "jobFunction",        "type": "SELECT", "label": "직무",     "required": true, "optionsRef": "JOB_FUNCTION" },
         { "key": "jobLevel",           "type": "SELECT", "label": "직급",     "required": true, "optionsRef": "JOB_LEVEL" },

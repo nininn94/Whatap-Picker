@@ -1,6 +1,10 @@
 package io.whatap.picker.admin;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.whatap.picker.auth.jwt.AppPrincipal;
+import io.whatap.picker.common.ApiException;
+import io.whatap.picker.common.ErrorCode;
 import io.whatap.picker.setting.AppSettingService;
 import io.whatap.picker.sheets.SheetsClient;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -10,11 +14,16 @@ import org.springframework.web.bind.annotation.*;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("/api/admin/settings")
 @PreAuthorize("hasRole('ADMIN')")
 public class AdminSettingController {
+
+    private static final Pattern EMAIL_RE =
+            Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final AppSettingService settings;
     private final SheetsClient sheetsClient;
@@ -63,8 +72,28 @@ public class AdminSettingController {
         }
         if (req.google != null) {
             if (req.google.serviceAccountJson != null && !req.google.serviceAccountJson.isBlank()) {
-                settings.put(AppSettingService.GOOGLE_SERVICE_ACCOUNT_JSON,
-                        req.google.serviceAccountJson.trim(), actorId);
+                String trimmed = req.google.serviceAccountJson.trim();
+                // 형식 검증 — type=service_account 필수, private_key 포함, client_email 형식.
+                try {
+                    JsonNode node = OBJECT_MAPPER.readTree(trimmed);
+                    if (!"service_account".equals(node.path("type").asText())) {
+                        throw new ApiException(ErrorCode.VALIDATION_FAILED,
+                                "Service Account JSON 이 아닙니다 (type 필드 확인).");
+                    }
+                    if (node.path("private_key").asText().isBlank()) {
+                        throw new ApiException(ErrorCode.VALIDATION_FAILED,
+                                "private_key 가 비어 있습니다.");
+                    }
+                    String email = node.path("client_email").asText();
+                    if (!EMAIL_RE.matcher(email).matches()) {
+                        throw new ApiException(ErrorCode.VALIDATION_FAILED,
+                                "client_email 형식이 올바르지 않습니다.");
+                    }
+                } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+                    throw new ApiException(ErrorCode.VALIDATION_FAILED,
+                            "JSON 파싱 실패: " + e.getOriginalMessage());
+                }
+                settings.put(AppSettingService.GOOGLE_SERVICE_ACCOUNT_JSON, trimmed, actorId);
             }
         }
         return get();
@@ -103,16 +132,20 @@ public class AdminSettingController {
         return key.substring(0, 7) + "***" + key.substring(key.length() - 4);
     }
 
-    /** Service Account JSON 에서 client_email 만 파싱해 표시용으로 반환. */
+    /**
+     * Service Account JSON 에서 client_email 만 파싱해 표시용으로 반환.
+     * Jackson 으로 안전 파싱 + 이메일 형식 통과한 값만 반환 → 잘못된 JSON 으로 인한
+     * 응답 오염/XSS payload 주입 방지.
+     */
     private static String extractClientEmail(String json) {
-        if (json == null) return null;
-        int i = json.indexOf("\"client_email\"");
-        if (i < 0) return null;
-        int colon = json.indexOf(':', i);
-        int q1 = json.indexOf('"', colon + 1);
-        int q2 = json.indexOf('"', q1 + 1);
-        if (q1 < 0 || q2 < 0) return null;
-        return json.substring(q1 + 1, q2);
+        if (json == null || json.isBlank()) return null;
+        try {
+            JsonNode node = OBJECT_MAPPER.readTree(json);
+            String email = node.path("client_email").asText();
+            return EMAIL_RE.matcher(email).matches() ? email : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public static class UpdateRequest {

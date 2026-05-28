@@ -63,17 +63,20 @@
         <form onsubmit="return saveGoogle(event)" style="display:grid; gap:14px; max-width: 720px;">
             <label style="display:flex; flex-direction:column; gap:4px;">
                 <span style="font-weight:600;">Service Account JSON</span>
-                <textarea name="serviceAccountJson" rows="6" placeholder='{
-  "type": "service_account",
-  "project_id": "...",
-  "private_key_id": "...",
-  "private_key": "-----BEGIN PRIVATE KEY-----\n...",
-  "client_email": "...@....iam.gserviceaccount.com",
-  ...
-}' style="width:100%; font-family:monospace; font-size:0.82rem;"></textarea>
+                <div style="position:relative;">
+                    <textarea name="serviceAccountJson" rows="6"
+                              autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"
+                              placeholder='{"type":"service_account", ...}'
+                              style="width:100%; font-family:monospace; font-size:0.82rem; -webkit-text-security: disc; text-security: disc;"></textarea>
+                    <label style="display:inline-flex; gap:4px; align-items:center; font-size:0.8rem; margin-top:4px;">
+                        <input type="checkbox" onchange="toggleJsonReveal(this)">
+                        <span>입력 표시</span>
+                    </label>
+                </div>
                 <span class="field-help">
-                    Google Cloud Console → IAM & Admin → Service Accounts → Keys → ADD KEY → JSON.
-                    저장 후엔 값이 표시되지 않습니다. 변경하지 않으려면 비워두세요.
+                    Google Cloud Console → IAM &amp; Admin → Service Accounts → Keys → ADD KEY → JSON.
+                    저장된 JSON 은 응답에 노출되지 않습니다 (서버 측 client_email 만 식별용으로 추출).
+                    변경하지 않으려면 비워두세요.
                 </span>
             </label>
             <div style="display:flex; gap:8px;">
@@ -129,9 +132,15 @@
 
             const g = data.google || {};
             const gs = document.getElementById('google-status');
-            gs.innerHTML = g.configured
-                ? `✅ <strong>등록됨</strong> · 서비스 계정 <code>${g.serviceAccountEmail || '(이메일 파싱 실패)'}</code>`
-                : '⚠️ Service Account JSON 이 설정되지 않았습니다.';
+            gs.textContent = ''; // 매번 초기화
+            if (g.configured) {
+                gs.appendChild(document.createTextNode('✅ 등록됨 · 서비스 계정 '));
+                const code = document.createElement('code');
+                code.textContent = g.serviceAccountEmail || '(이메일 파싱 실패)';
+                gs.appendChild(code);
+            } else {
+                gs.textContent = '⚠️ Service Account JSON 이 설정되지 않았습니다.';
+            }
         } catch (e) {
             document.getElementById('anthropic-status').textContent = '로드 실패: ' + e.message;
         }
@@ -175,6 +184,12 @@
             load();
         } catch (e) { toast(e.message, true); }
         return false;
+    }
+
+    function toggleJsonReveal(cb) {
+        const ta = document.forms[0].serviceAccountJson;
+        ta.style.webkitTextSecurity = cb.checked ? 'none' : 'disc';
+        ta.style.textSecurity        = cb.checked ? 'none' : 'disc';
     }
 
     async function clearGoogle() {
