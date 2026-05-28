@@ -19,9 +19,11 @@ fi
 echo "==> [1/6] 시스템 패키지 업데이트"
 sudo dnf -y update
 
-echo "==> [2/6] Docker 설치 및 부팅 시 자동 시작"
-sudo dnf -y install docker
+echo "==> [2/6] Docker + cron 설치 및 부팅 시 자동 시작"
+# AL2023 기본 이미지에는 cron이 없어서 같이 설치 (step 6에서 사용)
+sudo dnf -y install docker cronie
 sudo systemctl enable --now docker
+sudo systemctl enable --now crond
 sudo usermod -aG docker "$USER"
 
 echo "==> [3/6] docker compose plugin 설치"
