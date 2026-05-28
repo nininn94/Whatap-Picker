@@ -39,19 +39,34 @@ const adminApi = (() => {
         },
         /**
          * CSV / 파일 다운로드.
-         * 인증은 HttpOnly 쿠키로 자동 동행 → fetch+blob 패턴(혹은 그 안에서의
-         * URL.createObjectURL revoke 타이밍) 없이 native browser download 로
-         * 처리해 blob URL 이슈(ERR_NAME_NOT_RESOLVED 등) 회피.
+         * fetch 로 본문을 받아 Blob 으로 만들고 anchor.click() 으로 다운로드.
+         * 직접 anchor href 방식은 HTTPS 페이지가 백엔드(HTTP)로 redirect 될 때
+         * Chrome 의 mixed-content 차단("인터넷 연결 상태 확인" 메시지)에 걸린다.
+         * fetch → 같은 origin → blob: URL 은 항상 안전. revoke 는 충분히 지연.
          */
         async download(path, filename) {
+            const h = { 'Accept': '*/*' };
+            if (token()) h['Authorization'] = 'Bearer ' + token();
+            const res = await fetch(path, { credentials:'same-origin', headers: h });
+            if (!res.ok) {
+                let msg = `다운로드 실패 (${res.status})`;
+                try { const t = await res.text(); const j = JSON.parse(t); if (j.message) msg = j.message; } catch {}
+                throw new Error(msg);
+            }
+            const cd = res.headers.get('Content-Disposition') || '';
+            const m = cd.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+            const name = filename || (m ? decodeURIComponent(m[1] || m[2]) : 'download.csv');
+
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = path;
-            if (filename) a.download = filename;
-            a.rel = 'noopener';
-            // download 속성을 anchor 에 두면 브라우저가 Content-Disposition 을 우선 사용.
+            a.href = url;
+            a.download = name;
+            a.style.display = 'none';
             document.body.appendChild(a);
             a.click();
-            setTimeout(() => a.remove(), 1500);
+            // Chrome download manager 가 blob 을 가져갈 충분한 시간 확보(5s).
+            setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 5000);
         }
     };
 })();

@@ -94,47 +94,71 @@ public class AiController {
     @PostMapping("/api/admin/leads/rescore")
     @PreAuthorize("hasRole('ADMIN')")
     public Map<String, Object> rescore(@RequestBody RescoreRequest req) {
-        java.util.function.Predicate<UUID> eventFilter = id -> true;
+        final UUID eventId;
         if (req != null && req.eventCode() != null && !req.eventCode().isBlank()) {
-            UUID eventId = eventRepository.findByEventCode(req.eventCode())
+            eventId = eventRepository.findByEventCode(req.eventCode())
                     .orElseThrow(() -> new ApiException(ErrorCode.EVENT_NOT_FOUND))
                     .getId();
-            eventFilter = id -> leadRepository.findById(id)
-                    .map(l -> l.getEventId().equals(eventId)).orElse(false);
+        } else {
+            eventId = null;
         }
 
-        List<LeadScore> targets = new java.util.ArrayList<>();
         boolean all = req != null && Boolean.TRUE.equals(req.all());
+
+        // 처리할 leadId 수집 — all 모드는 Lead 테이블 직접 순회(누락된 LeadScore 도 새로 생성).
+        // 비-all 모드는 기존 LeadScore 의 status 로 필터.
+        List<UUID> leadIds = new java.util.ArrayList<>();
         if (all) {
-            // 전체 재분석 — MANUAL_OVERRIDE 만 보존, 그 외 모든 상태 큐잉
-            for (AiStatus s : AiStatus.values()) {
-                if (s == AiStatus.MANUAL_OVERRIDE) continue;
-                targets.addAll(repository.findByAiStatus(s));
+            for (var l : leadRepository.findAll()) {
+                if (eventId != null && !eventId.equals(l.getEventId())) continue;
+                // MANUAL_OVERRIDE 은 보존
+                var existing = repository.findByLeadId(l.getId()).orElse(null);
+                if (existing != null && existing.getAiStatus() == AiStatus.MANUAL_OVERRIDE) continue;
+                leadIds.add(l.getId());
             }
-        } else if (req != null && req.aiStatus() != null) {
-            targets.addAll(repository.findByAiStatus(req.aiStatus()));
         } else {
-            targets.addAll(repository.findByAiStatus(AiStatus.PENDING));
-            targets.addAll(repository.findByAiStatus(AiStatus.FAILED));
+            List<LeadScore> targets = new java.util.ArrayList<>();
+            if (req != null && req.aiStatus() != null) {
+                targets.addAll(repository.findByAiStatus(req.aiStatus()));
+            } else {
+                targets.addAll(repository.findByAiStatus(AiStatus.PENDING));
+                targets.addAll(repository.findByAiStatus(AiStatus.FAILED));
+            }
+            for (LeadScore s : targets) {
+                if (eventId == null
+                        || leadRepository.findById(s.getLeadId())
+                            .map(l -> l.getEventId().equals(eventId)).orElse(false)) {
+                    leadIds.add(s.getLeadId());
+                }
+            }
         }
         log.info("rescore all={} eventCode={} candidates={}", all,
-                req == null ? null : req.eventCode(), targets.size());
+                req == null ? null : req.eventCode(), leadIds.size());
 
-        long queued = targets.stream().map(LeadScore::getLeadId)
-                .filter(eventFilter).peek(pipeline::score).count();
+        long queued = 0; long failed = 0;
+        for (UUID id : leadIds) {
+            try { pipeline.score(id); queued++; }
+            catch (Exception e) { failed++; log.warn("rescore failed leadId={}: {}", id, e.toString()); }
+        }
 
         // 처리 후 Stage 분포 — UI 가 결과 검증할 수 있도록.
         java.util.Map<String, Long> dist = new java.util.LinkedHashMap<>();
         dist.put("MQL", 0L); dist.put("KNOWN_LEAD", 0L); dist.put("PENDING_OR_OTHER", 0L);
-        for (LeadScore s : repository.findAll()) {
-            if (s.getGrade() == null) dist.merge("PENDING_OR_OTHER", 1L, Long::sum);
+        long leadCount = 0;
+        for (var l : leadRepository.findAll()) {
+            if (eventId != null && !eventId.equals(l.getEventId())) continue;
+            leadCount++;
+            var s = repository.findByLeadId(l.getId()).orElse(null);
+            if (s == null || s.getGrade() == null) dist.merge("PENDING_OR_OTHER", 1L, Long::sum);
             else dist.merge(s.getGrade().name(), 1L, Long::sum);
         }
-        log.info("rescore done queued={} dist={}", queued, dist);
+        log.info("rescore done queued={} failed={} leads={} dist={}", queued, failed, leadCount, dist);
 
         java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("queued", queued);
-        out.put("candidates", targets.size());
+        out.put("failed", failed);
+        out.put("candidates", leadIds.size());
+        out.put("totalLeads", leadCount);
         out.put("distribution", dist);
         return out;
     }

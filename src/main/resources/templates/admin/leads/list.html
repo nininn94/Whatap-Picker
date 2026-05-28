@@ -422,7 +422,10 @@
         try {
             const r = await adminApi.post('/api/admin/leads/rescore', { eventCode: ec || null, all: true });
             const d = r.distribution || {};
-            toast(`재분석 ${r.queued}/${r.candidates}건 — MQL ${d.MQL ?? 0} · Known ${d.KNOWN_LEAD ?? 0} · 기타 ${d.PENDING_OR_OTHER ?? 0}`);
+            const msg = r.totalLeads === 0
+                ? `대상 리드가 0건입니다. (조회 조건: ${scope})`
+                : `재분석 ${r.queued}/${r.candidates}건 · 실패 ${r.failed ?? 0} — MQL ${d.MQL ?? 0} · Known ${d.KNOWN_LEAD ?? 0} · 기타 ${d.PENDING_OR_OTHER ?? 0} (전체 리드 ${r.totalLeads})`;
+            toast(msg);
             setTimeout(() => { loadPending(); loadLeads(); }, 1500);
         } catch (e) { toast(e.message, true); }
     }
