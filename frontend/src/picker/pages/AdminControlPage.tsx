@@ -26,6 +26,7 @@ type AdminControlPageProps = {
   canApplyEventSelection: boolean;
   onResetPickedState: () => void;
   onBackToEntry: () => void;
+  onPreviewPick: (index: number) => void;
   onEventCodeDraftChange: (value: string) => void;
   onSubmitEventSelection: (event: FormEvent<HTMLFormElement>) => void;
 };
@@ -49,6 +50,7 @@ export function AdminControlPage({
   canApplyEventSelection,
   onResetPickedState,
   onBackToEntry,
+  onPreviewPick,
   onEventCodeDraftChange,
   onSubmitEventSelection,
 }: AdminControlPageProps) {
@@ -86,7 +88,7 @@ export function AdminControlPage({
             resultOverlay={resultOverlay}
             confettiTrigger={confettiTrigger}
             emptyMessage="이벤트를 선택하면 실제 경품 재고 기준 뽑기판이 표시됩니다."
-            onPick={() => undefined}
+            onPick={onPreviewPick}
           />
         </div>
 

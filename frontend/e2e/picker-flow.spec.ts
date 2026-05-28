@@ -2,7 +2,13 @@ import { expect, test, type Page } from "@playwright/test";
 
 const STORAGE_KEY = "whatap-picker-display-v8";
 
-async function routePrizeInventory(page: Page) {
+async function routePrizeInventory(page: Page, prizes = [
+  { rank: 1, name: "프리미엄 굿즈", initial: 10, awarded: 2, remaining: 8 },
+  { rank: 2, name: "텀블러", initial: 40, awarded: 10, remaining: 30 },
+  { rank: 3, name: "스티커팩", initial: 90, awarded: 0, remaining: 90 },
+  { rank: 4, name: "쿠폰", initial: 160, awarded: 0, remaining: 160 },
+  { rank: 5, name: "참가 기념품", initial: 200, awarded: 0, remaining: 200 },
+]) {
   await page.route("**/api/events", async (route) => {
     await route.fulfill({
       status: 200,
@@ -26,13 +32,7 @@ async function routePrizeInventory(page: Page) {
       body: JSON.stringify({
         eventCode: "event-1",
         eventDate: "2026-05-28",
-        prizes: [
-          { rank: 1, name: "프리미엄 굿즈", initial: 10, awarded: 2, remaining: 8 },
-          { rank: 2, name: "텀블러", initial: 40, awarded: 10, remaining: 30 },
-          { rank: 3, name: "스티커팩", initial: 90, awarded: 0, remaining: 90 },
-          { rank: 4, name: "쿠폰", initial: 160, awarded: 0, remaining: 160 },
-          { rank: 5, name: "참가 기념품", initial: 200, awarded: 0, remaining: 200 },
-        ],
+        prizes,
       }),
     });
   });
@@ -101,6 +101,42 @@ test("opens admin management for the special account", async ({ page }) => {
   await expect
     .poll(async () => page.evaluate((key) => localStorage.getItem(key) || "", STORAGE_KEY))
     .not.toContain("\"cells\"");
+});
+
+test("previews admin chart clicks without drawing from real inventory", async ({ page }) => {
+  const drawRequests: string[] = [];
+  await routePrizeInventory(page, [
+    { rank: 1, name: "프리미엄 굿즈", initial: 10, awarded: 0, remaining: 10 },
+    { rank: 2, name: "텀블러", initial: 40, awarded: 0, remaining: 40 },
+    { rank: 3, name: "스티커팩", initial: 90, awarded: 0, remaining: 90 },
+    { rank: 4, name: "쿠폰", initial: 160, awarded: 0, remaining: 160 },
+    { rank: 5, name: "참가 기념품", initial: 200, awarded: 0, remaining: 200 },
+  ]);
+  await page.route("**/api/draw", async (route) => {
+    drawRequests.push(route.request().method());
+    await route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+  });
+  await page.goto("/?eventCode=event-1");
+
+  await page.getByLabel("성").fill("wha");
+  await page.getByLabel("이름").fill("tap");
+  await page.getByLabel("전화번호 뒷자리").fill("1111");
+  await page.getByRole("button", { name: /이벤트 참여하기/ }).click();
+
+  const chart = page.getByRole("img", { name: /500칸 뽑기 차트/ });
+  const chartBox = await chart.boundingBox();
+  if (!chartBox) throw new Error("chart was not rendered");
+
+  await page.mouse.click(chartBox.x + 70, chartBox.y + chartBox.height - 55);
+
+  await expect(page.getByTestId("draw-result-rank")).toBeVisible({ timeout: 5_000 });
+  expect(drawRequests).toHaveLength(0);
+  await expect
+    .poll(async () => page.evaluate((key) => localStorage.getItem(key) || "", STORAGE_KEY))
+    .toBe("");
+
+  await page.getByRole("button", { name: "확인" }).click();
+  await expect(page.getByText("이벤트 및 뽑기판 관리")).toBeVisible();
 });
 
 test("resets locally saved picked cells", async ({ page }) => {

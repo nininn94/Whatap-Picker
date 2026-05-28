@@ -375,11 +375,50 @@ export default function App() {
     setConfettiTrigger((prev) => prev + 1);
   }
 
+  function confirmResult() {
+    if (view === "admin") {
+      setSelectedResult(null);
+      setActivePickKey(null);
+      setIsRevealing(false);
+      setConfettiTrigger(0);
+      setDrawError("");
+      return;
+    }
+
+    finishCycle();
+  }
+
   function clearRevealTimer() {
     if (revealTimerRef.current !== null) {
       window.clearTimeout(revealTimerRef.current);
       revealTimerRef.current = null;
     }
+  }
+
+  function previewAdminPick(index: number) {
+    const cell = state.cells[index];
+    if (!cell || cell.empty || isRevealing) return;
+
+    const result: PickResult = {
+      id: `admin-preview-${cell.id}-${Date.now()}`,
+      cellNumber: index + 1,
+      rank: cell.rank,
+      name: cell.name,
+      pickedAt: new Date().toISOString(),
+    };
+
+    setDrawError("");
+    setSelectedResult(null);
+    setActivePickKey(cell.id);
+    setIsRevealing(true);
+    clearRevealTimer();
+
+    revealTimerRef.current = window.setTimeout(() => {
+      showResult(result);
+      setIsRevealing(false);
+      setActivePickKey(null);
+      revealTimerRef.current = null;
+    }, PICK_REVEAL_DURATION_MS);
   }
 
   async function pickCell(index: number) {
@@ -481,7 +520,7 @@ export default function App() {
   const resultOverlay = (
     <DrawResultOverlay
       result={selectedResult}
-      onConfirm={finishCycle}
+      onConfirm={confirmResult}
     />
   );
   const drawEffect = (
@@ -519,6 +558,7 @@ export default function App() {
         canApplyEventSelection={canApplyEventSelection}
         onResetPickedState={resetPickedState}
         onBackToEntry={finishCycle}
+        onPreviewPick={previewAdminPick}
         onEventCodeDraftChange={setEventCodeDraft}
         onSubmitEventSelection={submitEventSelection}
       />
