@@ -1,0 +1,132 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (defaults to current commit SHA)"
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/whatap-picker
+
+jobs:
+  build-and-push:
+    name: Build & push image to GHCR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.tag.outputs.value }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            echo "value=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.value }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to EC2
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for compose file)
+        uses: actions/checkout@v4
+
+      - name: Copy compose file to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: docker-compose.prod.yml
+          target: /opt/whatap-picker/
+          overwrite: true
+
+      - name: Pull image & restart on EC2
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          BOOTSTRAP_ADMIN_USERNAME: ${{ secrets.BOOTSTRAP_ADMIN_USERNAME }}
+          BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          APP_PUBLIC_BASE_URL: ${{ secrets.APP_PUBLIC_BASE_URL }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: REGISTRY,IMAGE_NAME,IMAGE_TAG,JWT_SECRET,BOOTSTRAP_ADMIN_USERNAME,BOOTSTRAP_ADMIN_PASSWORD,POSTGRES_PASSWORD,APP_PUBLIC_BASE_URL
+          script: |
+            set -euo pipefail
+
+            cd /opt/whatap-picker
+
+            umask 077
+            cat > .env <<EOF
+            REGISTRY=${REGISTRY}
+            IMAGE_NAME=${IMAGE_NAME}
+            IMAGE_TAG=${IMAGE_TAG}
+            JWT_SECRET=${JWT_SECRET}
+            BOOTSTRAP_ADMIN_USERNAME=${BOOTSTRAP_ADMIN_USERNAME:-admin}
+            BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD}
+            POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+            APP_PUBLIC_BASE_URL=${APP_PUBLIC_BASE_URL}
+            SPRING_AI_OLLAMA_INIT_PULL_MODEL_STRATEGY=never
+            EOF
+
+            docker compose -f docker-compose.prod.yml pull app
+            docker compose -f docker-compose.prod.yml up -d
+            docker compose -f docker-compose.prod.yml ps
+
+            # 8GB 디스크 보호: 24h 이상 된 dangling 이미지 정리
+            docker image prune -af --filter "until=24h" || true
+
+      - name: Health check
+        env:
+          HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          echo "Waiting for app to become healthy at http://${HOST}:8080/actuator/health ..."
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 5 "http://${HOST}:8080/actuator/health" >/dev/null; then
+              echo "✅ App is healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "❌ App did not become healthy within 150s"
+          exit 1

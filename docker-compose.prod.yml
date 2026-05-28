@@ -1,0 +1,56 @@
+# 운영용 compose — EC2(t3.micro)에서 사용. GHA가 배포 시 자동으로 ${...} 값을 채운 .env를 같이 둠.
+# 로컬 개발은 기존 docker-compose.yml을 사용 (Ollama 포함).
+# t3.micro RAM 1GB 제약으로 Ollama는 EC2에서 제외 — AI 룰 8개로 80~85% 커버, LLM 폴백 호출은 실패 시 FAILED 처리.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: picker-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: picker
+      POSTGRES_USER: picker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U picker"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    # 외부 포트 노출 안 함 — app만 내부 네트워크로 접근
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  app:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME}:${IMAGE_TAG:-latest}
+    container_name: picker-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_USER: picker
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD}
+      APP_PUBLIC_BASE_URL: ${APP_PUBLIC_BASE_URL}
+      # Ollama 미사용 — 부팅 시 모델 pull 시도 차단
+      SPRING_AI_OLLAMA_INIT_PULL_MODEL_STRATEGY: ${SPRING_AI_OLLAMA_INIT_PULL_MODEL_STRATEGY:-never}
+      # JVM 힙 제한 — 1GB RAM에서 OOM 방지 (postgres ~200MB 남기고 사용)
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=60 -XX:InitialRAMPercentage=40"
+    ports:
+      - "8080:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
