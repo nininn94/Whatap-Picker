@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head(title=${event.label + ' - QR 입장'})}">
+    <!-- 1시간마다 새로고침 -->
+    <meta http-equiv="refresh" content="3600">
+</head>
+<body class="qr-display">
+    <h1 th:text="${event.label}">WhaTap 부스</h1>
+    <div class="qr-image">
+        <img th:src="${qrImageUrl}" th:alt="${event.eventCode}">
+    </div>
+    <p class="instruction">스마트폰 카메라로 QR을 스캔해 설문에 참여해 주세요.</p>
+    <p class="muted" th:text="${surveyUrl}">URL</p>
+</body>
+</html>
