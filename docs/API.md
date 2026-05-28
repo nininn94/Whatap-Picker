@@ -452,7 +452,10 @@ PUT body 형태:
 
 ## 6. Rate limit / 보안 정책
 
-- **`POST /api/leads`** — 분당 한도 (Bucket4j 기반, `submitRateLimiter` qualifier). 초과 시 `TOO_MANY_REQUESTS`
+- **`POST /api/leads`** — 분당 한도 (Bucket4j 기반, `leadSubmitRateLimiter` qualifier).
+  기본 IP 당 분당 10회 — `security.rate-limit.lead-submit-per-min-per-ip`. 초과 시 `TOO_MANY_REQUESTS`
+- **`POST /api/auth/login`** — Bucket4j 기반 `loginRateLimiter`. 기본 IP 당 15분에 5회
+  — `security.rate-limit.login-attempts-per-15min`. 성공 시 reset
 - **JWT secret** — `JWT_SECRET` 환경변수, 32 바이트 이상 강제
 - **CSRF** — disabled (REST + JWT)
 - **세션** — STATELESS

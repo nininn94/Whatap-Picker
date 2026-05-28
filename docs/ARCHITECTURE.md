@@ -71,7 +71,7 @@ src/main/java/io/whatap/picker
 │   ├── LeadScore.java / LeadScoreResult.java
 │   ├── enums/ {Grade, NextAction, AiStatus, ScoreSource}
 │   ├── rules/RuleEngine.java              # MQL/KNOWN_LEAD 2단계 deterministic
-│   └── client/ {LlmGateway, AnthropicClient, OllamaClient}
+│   └── client/ {LlmGateway, AnthropicClient}        # Ollama 는 Spring AI starter 가 ChatClient 빈으로 자동 노출
 ├── auth
 │   ├── AuthController.java                # /api/auth/login,logout
 │   ├── AppUser.java + Repository, Role enum
@@ -210,7 +210,8 @@ GET 응답은 모두 마스킹/식별자만 노출. raw 값은 반환 안 함.
 | JWT 전송 | HttpOnly 쿠키 + `Authorization: Bearer` 헤더 (둘 다 허용) |
 | API 키 | DB 평문 저장, GET 응답에서 마스킹/숨김 (logs 에도 미노출) |
 | 설정 endpoint | `@PreAuthorize("hasRole('ADMIN')")` 전체 |
-| 설문 제출 rate-limit | Bucket4j 분당 한도 |
+| 설문 제출 rate-limit | Bucket4j, IP 당 분당 10회 (`security.rate-limit.lead-submit-per-min-per-ip`) |
+| 로그인 rate-limit | Bucket4j, IP 당 15분에 5회 (`security.rate-limit.login-attempts-per-15min`), 성공 시 reset |
 | 이메일 도메인 | 11종 개인 메일 차단 (학생/프리랜서 제외) |
 | HTTPS | EC2 직접 접근 시 HTTP, 운영 배포 시 ALB/CloudFront/Caddy 권장 |
 
