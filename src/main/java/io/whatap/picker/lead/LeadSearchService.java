@@ -45,8 +45,13 @@ public class LeadSearchService {
                 .orElseThrow(() -> new ApiException(ErrorCode.EVENT_NOT_FOUND));
 
         String normalizedName = name.replaceAll("\\s", "");
+        // 1차: full_name 정확 일치 (가장 빠름)
         List<Lead> leads = leadRepository.findByEventIdAndFullNameAndPhoneLast4(
                 event.getId(), normalizedName, phoneLast4);
+        // 2차: 부분 일치(대소문자 무시) 폴백 — "김관진" 의 일부("김") 입력만으로도 검색되도록
+        if (leads.isEmpty()) {
+            leads = leadRepository.searchByNameLike(event.getId(), normalizedName, phoneLast4);
+        }
 
         List<LeadSearchResponse.Item> items = leads.stream().map(lead -> {
             Optional<DrawHistory> history = drawHistoryRepository
