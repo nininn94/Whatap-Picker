@@ -7,7 +7,7 @@
 > - 경품 재고: 전부 유한, 어드민이 직접 설정 → 재고 소진 시 꽝 처리
 > - 이메일 정책: `jobFunction == STUDENT_FREELANCER`면 개인 메일 허용, 나머지 14종은 회사 메일 강제
 > - AI: 오픈소스 **Ollama** (Docker, CPU only), 모델 **`qwen2.5:1.5b`** (≈1GB, 한국어 분석 + JSON 모드 안정)
-> - **Spring Boot 4.x + Spring AI 1.x** — `ChatClient` + `BeanOutputConverter`로 구조화 출력(JSON 파싱 코드 0줄), `PromptTemplate` 변수 치환, Advisors로 로깅/메모리, Micrometer 자동 통합
+> - **Spring Boot 3.4 (LTS) + Spring AI 1.x** — `ChatClient` + `BeanOutputConverter`로 구조화 출력(JSON 파싱 코드 0줄), `PromptTemplate` 변수 치환, Advisors로 로깅/메모리, Micrometer 자동 통합. (Spring Boot 4 GA는 메이븐 센트럴 미배포 시점이라 3.4 LTS 채택)
 > - **부스 운영(검색/추첨/재고)은 비인증 공개** (기획서 운영자 흐름), **어드민 페이지/API만 로그인 필요**, 초기 어드민은 앱 기동 시 자동 시드
 > - JWT 만료: 8시간
 > - 데이터 보존: 24개월 (수집일 기준), 만료 시 hard delete
@@ -59,11 +59,11 @@
 
 | 영역 | 선택 | 비고 |
 | --- | --- | --- |
-| 언어/프레임워크 | **Java 21 + Spring Boot 4.x** | Spring Framework 7, Jakarta EE 11, AOT 컴파일 개선 |
-| 빌드 | Gradle | Wrapper 포함 |
+| 언어/프레임워크 | **Java 21 + Spring Boot 3.4 (LTS)** | Spring Framework 6.2, Jakarta EE 10 |
+| 빌드 | Gradle 8.14 (Docker 이미지) | Wrapper 미사용, `gradle:8.14-jdk21` 빌드 컨테이너 |
 | DB | **PostgreSQL 16 (Docker)** | `docker-compose up`으로 즉시 기동 |
-| ORM | **Spring Data JPA + Hibernate 7** | 마이그레이션은 Flyway |
-| 인증 | **Spring Security 7 + JWT** | SB4 기본 동봉, 운영자/어드민 로그인 |
+| ORM | **Spring Data JPA + Hibernate 6.6** | 마이그레이션은 Flyway (V1, V2…) |
+| 인증 | **Spring Security 6.4 + JWT (jjwt 0.12)** | 어드민 로그인, 운영 endpoint는 비인증 |
 | 비밀번호 해시 | BCrypt | Spring Security `PasswordEncoder` |
 | 검증 | Jakarta Bean Validation 3.1 | `@NotBlank`, `@Pattern`, custom validator |
 | **SSR 템플릿** | **Thymeleaf** | QR 표시·설문 폼·Thank you 페이지·어드민 폼 빌더 |
@@ -94,9 +94,9 @@ AppUser (운영자/어드민 계정)
 Lead (설문 제출자 — 1 행사 1 row)
 ├── id (PK, UUID)
 ├── event_id (FK Event)            ← 어느 행사 QR로 들어왔는지
-├── first_name (성)
-├── last_name (이름)
-├── full_name (검색용 = first_name + last_name)
+├── first_name (이름; 예: "길동")
+├── last_name (성;   예: "홍")
+├── full_name (검색용 generated column = last_name || first_name; 예: "홍길동" — 한국 이름 관례)
 ├── phone (정규화된 11자리)
 ├── phone_last4 (검색 가속)
 ├── company
@@ -1633,6 +1633,13 @@ src/main/java/io/whatap/picker/
     └── GlobalExceptionHandler.java
 ```
 
+**Flyway 마이그레이션 (`src/main/resources/db/migration/`)**
+
+| 버전 | 내용 |
+| --- | --- |
+| `V1__init.sql` | 11개 테이블 + 인덱스 (app_user, form_template, event, prize, lead, draw_history, lead_score, ai_rule, ai_prompt_template, email_rejection_log, audit_log) |
+| `V2__fullname_order.sql` | `lead.full_name` generated column 순서를 `last_name \|\| first_name` 으로 재정의 + 검색 인덱스 재생성 |
+
 **Thymeleaf 템플릿 위치**
 
 ```
@@ -1675,14 +1682,14 @@ src/main/resources/templates/
 > Spring AI 도입으로 JSON 파싱/HTTP 클라이언트 코드 사라져 약 0.5h 절감. **약 20~24h** (2.5~3일 분량). 해커톤 시연만 기준이면 룰/프롬프트 편집 UI는 Phase 9로 미루고 시드 룰 하드코딩으로 시작 가능.
 
 ### Phase 0 — 인프라 셋업 (1h)
-- **Spring Boot 4.x** 프로젝트 생성, Gradle
+- **Spring Boot 3.4 (LTS)** 프로젝트 생성, Gradle Kotlin DSL
 - 의존성: `web` + `thymeleaf` + `data-jpa` + `security` + `validation` + `flyway-postgresql` + **`spring-ai-starter-model-ollama`**
 - `docker-compose.yml` 작성 (Postgres + Ollama + 앱)
 - Flyway 초기 마이그레이션, 공통 예외 핸들러, Springdoc OpenAPI
 - Ollama 컨테이너에 `qwen2.5:1.5b` pull (`spring.ai.ollama.init.pull-model-strategy=when_missing`로 앱이 자동 처리도 가능)
 
 ### Phase 1 — 인증 (1.5h)
-- `AppUser` + BCrypt, Spring Security 7 + JWT
+- `AppUser` + BCrypt, Spring Security 6.4 + JWT (jjwt 0.12)
 - `POST /api/auth/login`, `BootstrapAdminRunner`
 
 ### Phase 2 — 설문 도메인 (3h)
@@ -1767,10 +1774,12 @@ spring:
     enabled: true
 
 spring.ai:
+  model:
+    embedding: none                          # 사용하지 않는 임베딩 모델 자동 pull 차단
   ollama:
     base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
     init:
-      pull-model-strategy: when_missing    # 앱 기동 시 모델 자동 pull
+      pull-model-strategy: when_missing      # 앱 기동 시 모델 자동 pull
       timeout: 5m
     chat:
       options:
@@ -1868,7 +1877,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       BOOTSTRAP_ADMIN_USERNAME: admin
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD}
-    ports: ["8080:8080"]
+      APP_PUBLIC_BASE_URL: ${APP_PUBLIC_BASE_URL:-http://localhost:8181}
+    ports: ["8181:8080"]   # 호스트 8080 점유 회피 (httpd 등)
 
 volumes:
   postgres_data:
@@ -1886,8 +1896,37 @@ docker exec -it $(docker compose ps -q ollama) ollama pull qwen2.5:1.5b  # ~1GB 
 docker compose up -d app
 
 # 헬스체크
-curl http://localhost:8080/actuator/health
+curl http://localhost:8181/actuator/health   # → {"status":"UP"}
 ```
+
+### 9.4 `Dockerfile`
+
+Gradle wrapper 미사용 — 빌드 시점에 `gradle:8.14-jdk21` 이미지로 컴파일 후 `eclipse-temurin:21-jre`에 jar만 복사하는 멀티 스테이지.
+
+```dockerfile
+FROM gradle:8.14-jdk21 AS build
+WORKDIR /workspace
+COPY settings.gradle.kts build.gradle.kts ./
+COPY src ./src
+RUN gradle --no-daemon bootJar -x test
+
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+COPY --from=build /workspace/build/libs/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java","-jar","/app/app.jar"]
+```
+
+### 9.5 접근 URL
+
+| 경로 | 용도 |
+| --- | --- |
+| `http://localhost:8181/admin` | 어드민 SSR (JWT 토큰을 `localStorage.jwt` 에 저장 후 접근) |
+| `http://localhost:8181/survey/{eventCode}` | 방문자용 설문 폼 |
+| `http://localhost:8181/event/{eventCode}/qr` | 부스 풀스크린 QR 페이지 |
+| `http://localhost:8181/event/{eventCode}/qr.png` | QR 이미지 (1024×1024 PNG, 24h cache) |
+| `http://localhost:8181/swagger-ui.html` | OpenAPI 자동 문서 |
+| `http://localhost:8181/actuator/health` | 헬스체크 |
 
 ---
 
@@ -1924,8 +1963,8 @@ curl http://localhost:8080/actuator/health
 - ✅ PENDING 모니터링: 1h+ PENDING 카운트, 일괄 재분석 API
 - ✅ Ollama 최소 리소스: CPU 2코어 + 메모리 3GB 상한, `OLLAMA_NUM_PARALLEL=1`, `MAX_LOADED_MODELS=1`, `KEEP_ALIVE=10m`
 - ✅ 룰 시드 10개로 강화: 결정적 룰 8개 + LLM 힌트 2개 → 약 80~85% Lead가 LLM 호출 없이 분류
-- ✅ Spring Boot 4.x + Spring AI 1.x: `ChatClient` + `BeanOutputConverter` 구조화 출력, Advisors, Micrometer 자동 통합
-- ✅ Java 21, Spring Security 7, Hibernate 7 (SB4 기본)
+- ✅ Spring Boot 3.4 (LTS) + Spring AI 1.x: `ChatClient` + `BeanOutputConverter` 구조화 출력, Advisors, Micrometer 자동 통합
+- ✅ Java 21, Spring Security 6.4, Hibernate 6.6 (SB3.4 기본)
 - [ ] 자동 파기 배치 — 어드민 수동 버튼만으로 갈지, `@Scheduled` 잡 추가할지
 - [ ] 동의 철회 API — `event@whatap.io` 수신 수동 처리만 vs `POST /api/leads/{id}/withdraw`
 - [ ] 폼 빌더 UI 수준 — JSON 직편집 MVP 충분한지 vs 시각화 빌더까지 가야 하는지
@@ -1949,8 +1988,8 @@ curl http://localhost:8080/actuator/health
 12. **보안 기본기**: BCrypt, JWT, IP 기반 brute force 잠금, 공개 엔드포인트 rate limit, 검증 실패 시도 로깅
 13. **하이브리드 AI 등급**: 시드 룰 8개로 약 80~85% Lead를 LLM 호출 없이 즉시 분류, 나머지 borderline만 LLM 평가 — CPU 환경에서도 처리량 확보
 14. **마케터 셀프 서비스 AI**: 룰/프롬프트를 코드 배포 없이 어드민 UI에서 편집, 시뮬레이션으로 검증, 일괄 재분석 가능
-15. **Spring AI 1.x 활용**: `ChatClient.entity(Record.class)`로 JSON 파싱 코드 제거, `PromptTemplate` 변수 치환, Advisors로 로깅, Micrometer 메트릭 자동 통합 — Spring Boot 4 + Spring AI의 표준 패턴을 그대로 적용
+15. **Spring AI 1.x 활용**: `ChatClient.entity(Record.class)`로 JSON 파싱 코드 제거, `PromptTemplate` 변수 치환, Advisors로 로깅, Micrometer 메트릭 자동 통합 — Spring Boot 3.4 + Spring AI 1.x 표준 패턴
 
 ---
 
-*이 계획서는 v10 (부스 운영 endpoint 비인증 공개로 환원 — 기획서 §4 운영자 흐름 준수) 입니다.*
+*이 계획서는 v11 (로컬 E2E 검증 결과 코드 현실 반영: Spring Boot 4 → 3.4 LTS, hypersistence 제거, V2 fullname 순서 마이그레이션, embedding 자동 pull 차단, 호스트 포트 8181, Dockerfile gradle 이미지) 입니다.*
