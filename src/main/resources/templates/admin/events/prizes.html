@@ -19,7 +19,7 @@
             </p>
         </div>
         <div class="actions">
-            <a class="btn btn-secondary" th:href="@{|/admin/leads(eventCode=${event.eventCode})|}">리드 보기</a>
+            <a class="btn btn-secondary" th:href="@{/admin/leads(eventCode=${event.eventCode})}">리드 보기</a>
             <a class="btn btn-secondary" th:href="@{|/event/${event.eventCode}/qr|}" target="_blank">QR 띄우기</a>
             <button class="btn btn-secondary" onclick="addRow()">+ 등수 추가</button>
             <button class="btn btn-primary"   onclick="saveAll()">전체 저장</button>

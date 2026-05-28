@@ -370,6 +370,109 @@ pre.code-block {
     border: 1px solid var(--border);
 }
 
+/* ──────────────────  리드 페이지 가시성 강화  ────────────────── */
+
+/* KPI 스트립 */
+.kpi-strip {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px; margin-bottom: 16px;
+}
+.kpi-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 14px;
+    text-align: left; cursor: pointer;
+    display: flex; flex-direction: column; gap: 4px;
+    transition: transform .12s, box-shadow .12s, border-color .12s;
+    font: inherit;
+}
+.kpi-card:not([onclick]) { cursor: default; opacity: 0.92; }
+.kpi-card[onclick]:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--brand); }
+.kpi-card .kpi-label { color: var(--text-muted); font-size: 0.78rem;
+                       text-transform: uppercase; letter-spacing: .04em; }
+.kpi-card .kpi-value { font-size: 1.7rem; font-weight: 700; line-height: 1.1; }
+.kpi-card.kpi-total   { border-left: 4px solid var(--brand); }
+.kpi-card.kpi-A       { border-left: 4px solid var(--success); }
+.kpi-card.kpi-A .kpi-value { color: var(--success); }
+.kpi-card.kpi-B       { border-left: 4px solid var(--brand); }
+.kpi-card.kpi-B .kpi-value { color: var(--brand); }
+.kpi-card.kpi-C       { border-left: 4px solid #64748b; }
+.kpi-card.kpi-pending { border-left: 4px solid var(--warning); }
+.kpi-card.kpi-pending .kpi-value { color: var(--warning); }
+.kpi-card.kpi-consult { border-left: 4px solid #db2777; }
+.kpi-card.kpi-consult .kpi-value { color: #db2777; }
+
+/* 활성 필터 칩 */
+.filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #eff6ff; color: #1e3a8a; border: 1px solid #bfdbfe;
+    border-radius: 999px; padding: 4px 10px 4px 12px; font-size: 0.82rem;
+}
+.chip strong { font-weight: 600; }
+.chip .chip-x {
+    background: transparent; border: none; cursor: pointer;
+    color: #1e3a8a; font-size: 0.9rem; padding: 0 0 0 4px; line-height: 1;
+}
+.chip .chip-x:hover { color: var(--danger); }
+.chip.chip-clear {
+    background: transparent; color: var(--text-muted); border-color: var(--border-2);
+    cursor: pointer;
+}
+.chip.chip-clear:hover { background: var(--surface-2); color: var(--text); }
+
+/* 필터 details (접기/펴기) */
+.filter-details { padding: 14px 18px; }
+.filter-details > summary {
+    display: flex; align-items: center; cursor: pointer;
+    list-style: none; user-select: none;
+    font-weight: 600; padding: 4px 0;
+}
+.filter-details > summary::-webkit-details-marker { display: none; }
+.filter-details > summary .filter-summary-text { flex: 1; display: flex; align-items: center; }
+.filter-details > summary .caret { transition: transform .15s; color: var(--text-muted); }
+.filter-details[open] > summary .caret { transform: rotate(180deg); }
+
+/* 테이블 뷰 토글 */
+.view-toggle { display: inline-flex; gap: 4px; }
+.view-toggle .btn { padding: 5px 10px; font-size: 0.8rem; }
+
+/* 리드 테이블 — sticky thead + sticky 1st col + Stage 컬러스트립 */
+.leads-scroll { max-height: 70vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.leads-table { font-size: 0.85rem; }
+.leads-table thead {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--surface-2);
+    box-shadow: 0 1px 0 var(--border);
+}
+.leads-table th { background: var(--surface-2); }
+.leads-table .col-sticky-1 {
+    position: sticky; left: 0; z-index: 1;
+    background: var(--surface); min-width: 96px;
+    box-shadow: 1px 0 0 var(--border);
+}
+.leads-table thead .col-sticky-1 { z-index: 3; background: var(--surface-2); }
+.leads-table tbody tr:hover .col-sticky-1 { background: var(--surface-2); }
+
+.leads-table td.nowrap { white-space: nowrap; }
+.leads-table tbody tr { border-left: 3px solid transparent; }
+.leads-table tbody tr.lead-stripe-A { border-left-color: var(--success); }
+.leads-table tbody tr.lead-stripe-B { border-left-color: var(--brand); }
+.leads-table tbody tr.lead-stripe-C { border-left-color: #94a3b8; }
+.leads-table tbody tr.lead-stripe-none { border-left-color: #fbbf24; }
+
+/* 작은 태그 (상담 희망 등) */
+.tag {
+    display: inline-block; padding: 1px 8px; border-radius: 4px;
+    font-size: 0.72rem; font-weight: 600;
+}
+.tag-warn { background: #fce7f3; color: #9d174d; }
+
+/* 페이저 */
+.pager {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+
 /* ──────────────────  로그인 카드  ────────────────── */
 .login-shell {
     min-height: 100vh; display: flex; align-items: center; justify-content: center;

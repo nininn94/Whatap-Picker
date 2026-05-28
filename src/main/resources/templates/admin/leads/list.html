@@ -8,14 +8,33 @@
         <div class="title-block">
             <p class="breadcrumb"><a th:href="@{/admin}">홈</a><span class="sep">›</span>리드</p>
             <h1>리드 조회</h1>
-            <p class="subtitle">엑셀 표처럼 모든 설문 칼럼 확인 · 필터 · CSV · AI 인사이트.</p>
+            <p class="subtitle">Stage 카드 클릭으로 즉시 분류 · 필터 칩으로 적용 상태 한눈에 · 기본 12컬럼 / 전체 32컬럼 토글.</p>
+        </div>
+        <div class="actions">
+            <button class="btn btn-secondary" onclick="loadPending()">대기/실패 확인</button>
+            <button class="btn btn-secondary" onclick="rescore()">일괄 재분석</button>
+            <button class="btn btn-secondary" onclick="downloadCsv()">CSV</button>
+            <button class="btn btn-primary"   onclick="generateInsight()">🤖 AI 인사이트</button>
         </div>
     </header>
 
-    <!-- 필터 패널 -->
-    <div class="card">
-        <div class="card-header"><h2>필터</h2></div>
-        <div id="filter-grid" class="filter-grid">
+    <!-- Stage KPI 스트립 -->
+    <div class="kpi-strip" id="kpi-strip"></div>
+    <p id="pending-status" class="muted" style="margin: -8px 0 12px;"></p>
+
+    <!-- 활성 필터 칩 -->
+    <div class="filter-chips" id="filter-chips" style="display:none;"></div>
+
+    <!-- 필터 패널 (접기/펴기) -->
+    <details id="filter-card" class="card filter-details">
+        <summary>
+            <span class="filter-summary-text">
+                <span>🔍 필터</span>
+                <span class="muted" id="filter-count-badge" style="margin-left:8px;"></span>
+            </span>
+            <span class="caret">▾</span>
+        </summary>
+        <div class="filter-grid" style="margin-top:12px;">
             <label>행사
                 <select id="f-eventCode">
                     <option value="">전체</option>
@@ -23,7 +42,7 @@
                 </select>
             </label>
             <label>키워드 (이름/이메일/휴대폰/회사)
-                <input id="f-q" type="text" placeholder="검색...">
+                <input id="f-q" type="search" placeholder="검색...">
             </label>
             <label>산업      <select id="f-industry"><option value="">전체</option></select></label>
             <label>직무      <select id="f-jobFunction"><option value="">전체</option></select></label>
@@ -42,80 +61,107 @@
             </label>
         </div>
         <div class="toolbar" style="margin-top:14px;">
-            <button class="btn btn-sm btn-secondary" onclick="loadLeads()">조회</button>
+            <button class="btn btn-sm btn-primary"   onclick="loadLeads()">조회</button>
             <button class="btn btn-sm btn-ghost"     onclick="clearFilters()">필터 초기화</button>
-            <button class="btn btn-sm btn-ghost"     onclick="loadPending()">대기/실패 확인</button>
             <div class="spacer"></div>
-            <button class="btn btn-sm btn-secondary" onclick="rescore()">일괄 재분석</button>
             <button class="btn btn-sm btn-danger"    onclick="deleteExpired()">만료 파기</button>
-            <button class="btn btn-sm btn-primary"   onclick="downloadCsv()">CSV 다운로드</button>
-            <button class="btn btn-sm btn-primary"   onclick="generateInsight()">🤖 AI 인사이트</button>
         </div>
-        <p id="pending-status" class="muted" style="margin:8px 0 0;"></p>
-    </div>
+    </details>
 
     <!-- 인사이트 결과 -->
     <div id="insight-card" class="card" style="display:none;">
-        <h2 style="margin:0 0 8px;">🤖 AI 인사이트</h2>
-        <p class="muted" id="insight-meta"></p>
-        <pre id="insight-content" style="background:#fafafa; padding:16px; border-radius:6px; white-space:pre-wrap; line-height:1.6; font-family:inherit;"></pre>
+        <div class="card-header">
+            <h2>🤖 AI 인사이트</h2>
+            <span class="muted" id="insight-meta"></span>
+            <div class="spacer" style="flex:1;"></div>
+            <button class="btn btn-sm btn-ghost" onclick="document.getElementById('insight-card').style.display='none'">닫기</button>
+        </div>
+        <pre id="insight-content" class="code-block" style="white-space:pre-wrap; line-height:1.6; font-family:inherit;"></pre>
     </div>
 
     <!-- 리드 wide table -->
-    <div class="card">
+    <div class="card" style="padding:14px 14px 12px;">
         <div class="card-header">
-            <h2>리드</h2>
+            <h2 style="margin:0;">리드</h2>
             <span class="muted">총 <strong id="lead-count">-</strong>건</span>
+            <div class="spacer" style="flex:1;"></div>
+            <div class="view-toggle">
+                <button class="btn btn-sm" id="view-essential" onclick="setView('essential')">기본 12컬럼</button>
+                <button class="btn btn-sm" id="view-full"      onclick="setView('full')">전체 32컬럼</button>
+            </div>
         </div>
-        <div class="table-scroll">
+        <div class="table-scroll leads-scroll">
             <div id="leads-table" class="muted" style="padding:24px;">불러오는 중...</div>
         </div>
-        <div style="display:flex; gap:8px; align-items:center; margin-top:12px;">
+        <div class="pager">
             <button class="btn btn-sm btn-secondary" id="prev-page" onclick="prevPage()" disabled>← 이전</button>
             <span id="page-info" class="muted">-</span>
             <button class="btn btn-sm btn-secondary" id="next-page" onclick="nextPage()" disabled>다음 →</button>
+            <div style="flex:1;"></div>
+            <label class="muted" style="display:inline-flex; gap:6px; align-items:center;">
+                페이지 크기
+                <select id="page-size" onchange="changePageSize(this.value)">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                </select>
+            </label>
         </div>
     </div>
 </main>
 
 <script>
-    // ── enum 옵션 정의 ──
-    const ENUMS = {
-        industry: ['FINANCE_INSURANCE','EDUCATION_RESEARCH','IT_SERVICES','GOVT_PUBLIC','HEALTHCARE',
-                   'MANUFACTURING','RETAIL_ECOMMERCE','LOGISTICS','LIFE_SCIENCE','TELECOM',
-                   'MEDIA_ENTERTAINMENT','PROFESSIONAL_SERVICES','ENERGY_RESOURCES','HOTEL_TOURISM',
-                   'SERVICE_INDUSTRY','OTHER'],
-        jobFunction: ['DEVOPS','IT_OPS','SRE','DEVELOPER','R_AND_D','IT_PLANNING','SECURITY','CONSULTING',
-                      'DATA','INFRA','MARKETING_SALES','FINANCE_BACKOFFICE','EXECUTIVE','STUDENT_FREELANCER','OTHER'],
-        jobLevel: ['TOP_EXECUTIVE','SENIOR_MGR','MID_MGR','STAFF','OTHER'],
-        companySize: ['STARTUP','SMALL','SME','MID','LARGE','PUBLIC','UNKNOWN'],
-        employeeCountRange: ['R_1_50','R_51_200','R_201_500','R_501_1000','R_1001_5000','R_5001_PLUS'],
-        monitoringStatus: ['USING_WHATAP','USING_OTHER','NOT_USING'],
-        planWithinYear: ['A_OPEN','B_EXPAND','C_REPLACE','D_NEW_ADOPT'],
-        consultationPreference: ['ONSITE_MEETING','EMAIL_OR_PHONE'],
-        adoptionBlocker: ['COST','INTERNAL_PERSUASION','TECH_BURDEN','EFFECT_UNCERTAIN','NOT_PRIORITY']
+    // ── enum 옵션 + 라벨 매핑 (가독성 ↑) ──
+    const ENUM_LABELS = {
+        industry: { FINANCE_INSURANCE:'금융/보험', EDUCATION_RESEARCH:'교육/연구', IT_SERVICES:'IT 서비스',
+                    GOVT_PUBLIC:'공공', HEALTHCARE:'의료', MANUFACTURING:'제조', RETAIL_ECOMMERCE:'유통/이커머스',
+                    LOGISTICS:'물류', LIFE_SCIENCE:'바이오/의약', TELECOM:'통신', MEDIA_ENTERTAINMENT:'미디어',
+                    PROFESSIONAL_SERVICES:'전문서비스', ENERGY_RESOURCES:'에너지', HOTEL_TOURISM:'호텔/관광',
+                    SERVICE_INDUSTRY:'서비스업', OTHER:'기타' },
+        jobFunction: { DEVOPS:'DevOps', IT_OPS:'IT 운영', SRE:'SRE', DEVELOPER:'개발자', R_AND_D:'R&D',
+                       IT_PLANNING:'IT 기획', SECURITY:'보안', CONSULTING:'컨설팅', DATA:'데이터',
+                       INFRA:'인프라', MARKETING_SALES:'마케팅/영업', FINANCE_BACKOFFICE:'재무/지원',
+                       EXECUTIVE:'임원', STUDENT_FREELANCER:'학생/프리랜서', OTHER:'기타' },
+        jobLevel: { TOP_EXECUTIVE:'C-Level', SENIOR_MGR:'팀장급', MID_MGR:'중간관리자', STAFF:'실무자', OTHER:'기타' },
+        companySize: { STARTUP:'스타트업', SMALL:'소', SME:'중소', MID:'중견', LARGE:'대', PUBLIC:'공공', UNKNOWN:'미상' },
+        employeeCountRange: { R_1_50:'1-50', R_51_200:'51-200', R_201_500:'201-500',
+                              R_501_1000:'501-1000', R_1001_5000:'1001-5000', R_5001_PLUS:'5001+' },
+        monitoringStatus: { USING_WHATAP:'와탭 사용중', USING_OTHER:'타사 사용중', NOT_USING:'미사용' },
+        planWithinYear: { A_OPEN:'신규 오픈', B_EXPAND:'확장', C_REPLACE:'교체', D_NEW_ADOPT:'신규 도입' },
+        consultationPreference: { ONSITE_MEETING:'대면 미팅', EMAIL_OR_PHONE:'메일/전화' },
+        adoptionBlocker: { COST:'비용', INTERNAL_PERSUASION:'내부 설득', TECH_BURDEN:'기술 부담',
+                           EFFECT_UNCERTAIN:'효과 불확실', NOT_PRIORITY:'우선순위 낮음' }
     };
-    Object.entries(ENUMS).forEach(([k, opts]) => {
+    Object.entries(ENUM_LABELS).forEach(([k, map]) => {
         const sel = document.getElementById('f-' + k);
-        opts.forEach(v => {
+        Object.entries(map).forEach(([v, label]) => {
             const o = document.createElement('option');
-            o.value = v; o.textContent = v;
+            o.value = v; o.textContent = label;
             sel.appendChild(o);
         });
     });
+    function el(v, category) {
+        if (v == null || v === '') return '-';
+        return (ENUM_LABELS[category] && ENUM_LABELS[category][v]) || v;
+    }
 
-    // ── 표시할 컬럼 정의 (key + 라벨) ──
+    // ── 컬럼 정의 ──
+    const ESSENTIAL_KEYS = new Set([
+        'name','company','phone','email','industry','jobFunction','jobLevel',
+        'monitoringStatus','planWithinYear','consultationPreference','grade','createdAt'
+    ]);
     const COLUMNS = [
         ['name',         '이름'],
+        ['company',      '회사'],
         ['phone',        '휴대폰'],
         ['email',        '이메일'],
-        ['company',      '회사'],
         ['industry',     '산업'],
         ['jobFunction',  '직무'],
         ['jobLevel',     '직급'],
         ['companySize',  '기업규모'],
         ['employeeCountRange', '직원수'],
-        ['monitoringStatus',   '현재 모니터링'],
+        ['monitoringStatus',   '모니터링'],
         ['commercialProducts', '사용 상용툴'],
         ['openSourceProducts', '사용 오픈소스'],
         ['commercialDeployment',   '상용 운영방식'],
@@ -135,55 +181,178 @@
         ['interestProducts','관심 제품'],
         ['planWithinYear',  '1년 계획'],
         ['consultationPreference','상담'],
-        ['grade',        'Lifecycle Stage'],
+        ['grade',        'Stage'],
         ['createdAt',    '제출']
     ];
 
+    const ENUM_KEY_BY_COL = {
+        industry:'industry', jobFunction:'jobFunction', jobLevel:'jobLevel',
+        companySize:'companySize', employeeCountRange:'employeeCountRange',
+        monitoringStatus:'monitoringStatus', planWithinYear:'planWithinYear',
+        consultationPreference:'consultationPreference', adoptionBlocker:'adoptionBlocker'
+    };
+
+    const FILTER_KEYS = ['eventCode','q','industry','jobFunction','jobLevel','companySize',
+        'employeeCountRange','monitoringStatus','planWithinYear',
+        'consultationPreference','adoptionBlocker','grade'];
+    const FILTER_LABEL = {
+        eventCode:'행사', q:'키워드', industry:'산업', jobFunction:'직무', jobLevel:'직급',
+        companySize:'기업규모', employeeCountRange:'직원수', monitoringStatus:'모니터링',
+        planWithinYear:'1년 계획', consultationPreference:'상담희망',
+        adoptionBlocker:'망설이는 이유', grade:'Stage'
+    };
+
     let currentPage = 0;
     let totalPages = 0;
-    const PAGE_SIZE = 50;
+    let pageSize = 50;
+    let viewMode = localStorage.getItem('leads.view') || 'essential';
 
     function fmt(v) {
-        if (v == null || v === '') return '-';
-        if (Array.isArray(v)) return v.length ? v.join(', ') : '-';
+        if (v == null || v === '') return '<span class="muted">-</span>';
+        if (Array.isArray(v)) return v.length ? v.join(', ') : '<span class="muted">-</span>';
         if (typeof v === 'string' && v.length > 19 && v.includes('T'))
             return new Date(v).toLocaleString();
         return v;
     }
+    function truncate(s, n=30) {
+        if (s == null) return s;
+        const str = String(s);
+        return str.length > n ? `<span title="${str.replace(/"/g,'&quot;')}">${str.slice(0, n)}…</span>` : str;
+    }
 
-    function gradeCell(l) {
+    function gradeBadge(l) {
         if (l.grade) return `<span class="grade-${l.grade}">${l.grade}</span>`;
         if (l.aiStatus === 'PENDING') return '<span class="grade-PENDING">분석중</span>';
-        return '-';
+        if (l.aiStatus === 'FAILED')  return '<span class="grade-PENDING" style="background:#dc2626;">실패</span>';
+        return '<span class="muted">-</span>';
+    }
+    function rowStripClass(l) {
+        if (l.grade === 'A') return 'lead-stripe-A';
+        if (l.grade === 'B') return 'lead-stripe-B';
+        if (l.grade === 'C') return 'lead-stripe-C';
+        return 'lead-stripe-none';
     }
 
     function buildQuery() {
         const params = new URLSearchParams();
-        const keys = ['eventCode','q','industry','jobFunction','jobLevel','companySize',
-                      'employeeCountRange','monitoringStatus','planWithinYear',
-                      'consultationPreference','adoptionBlocker','grade'];
-        keys.forEach(k => {
+        FILTER_KEYS.forEach(k => {
             const v = document.getElementById('f-' + k).value;
             if (v) params.set(k, v);
         });
-        params.set('size', PAGE_SIZE);
+        params.set('size', pageSize);
         params.set('page', currentPage);
         return params;
     }
 
     function currentFilters() {
         const out = {};
-        const keys = ['eventCode','q','industry','jobFunction','jobLevel','companySize',
-                      'employeeCountRange','monitoringStatus','planWithinYear',
-                      'consultationPreference','adoptionBlocker','grade'];
-        keys.forEach(k => {
+        FILTER_KEYS.forEach(k => {
             const v = document.getElementById('f-' + k).value;
             if (v) out[k] = v;
         });
         return out;
     }
 
+    function renderFilterChips() {
+        const filters = currentFilters();
+        const box = document.getElementById('filter-chips');
+        const entries = Object.entries(filters);
+        if (entries.length === 0) {
+            box.style.display = 'none';
+            document.getElementById('filter-count-badge').textContent = '';
+            return;
+        }
+        box.style.display = '';
+        box.innerHTML = entries.map(([k, v]) => {
+            const label = FILTER_LABEL[k] || k;
+            const val = ENUM_LABELS[k] ? (ENUM_LABELS[k][v] || v) : v;
+            return `<span class="chip">${label}: <strong>${val}</strong>
+                    <button class="chip-x" title="제거" onclick="removeFilter('${k}')">✕</button></span>`;
+        }).join('')
+            + `<button class="chip chip-clear" onclick="clearFilters()">모두 지우기 ✕</button>`;
+        document.getElementById('filter-count-badge').textContent = `${entries.length}개 적용 중`;
+    }
+    function removeFilter(key) {
+        document.getElementById('f-' + key).value = '';
+        currentPage = 0; loadLeads();
+    }
+
+    function setView(mode) {
+        viewMode = mode;
+        localStorage.setItem('leads.view', mode);
+        document.getElementById('view-essential').classList.toggle('btn-primary', mode === 'essential');
+        document.getElementById('view-essential').classList.toggle('btn-secondary', mode !== 'essential');
+        document.getElementById('view-full').classList.toggle('btn-primary', mode === 'full');
+        document.getElementById('view-full').classList.toggle('btn-secondary', mode !== 'full');
+        loadLeads();
+    }
+    function visibleColumns() {
+        return viewMode === 'essential'
+            ? COLUMNS.filter(([k]) => ESSENTIAL_KEYS.has(k))
+            : COLUMNS;
+    }
+
+    function renderCell(l, key) {
+        if (key === 'name')  return `<td class="col-sticky-1"><a href="/admin/leads/${l.id}"><strong>${fmt(l[key])}</strong></a></td>`;
+        if (key === 'grade') return `<td>${gradeBadge(l)}</td>`;
+        if (key === 'consultationPreference') {
+            const v = l[key];
+            if (!v) return `<td><span class="muted">-</span></td>`;
+            return `<td><span class="tag tag-warn">${el(v, 'consultationPreference')}</span></td>`;
+        }
+        if (ENUM_KEY_BY_COL[key]) return `<td>${l[key] ? el(l[key], ENUM_KEY_BY_COL[key]) : '<span class="muted">-</span>'}</td>`;
+        if (key === 'email' || key === 'phone' || key === 'company')
+            return `<td class="nowrap">${fmt(l[key])}</td>`;
+        if (key === 'createdAt')
+            return `<td class="nowrap muted" style="font-size:0.82rem;">${l[key] ? new Date(l[key]).toLocaleString() : '-'}</td>`;
+        // 텍스트/배열 — 30자 truncate
+        const v = l[key];
+        if (v == null || v === '') return `<td><span class="muted">-</span></td>`;
+        if (Array.isArray(v)) return `<td>${v.length ? truncate(v.join(', '), 36) : '<span class="muted">-</span>'}</td>`;
+        return `<td>${truncate(v, 30)}</td>`;
+    }
+
+    function renderKpi(distribution, total, consult) {
+        const cards = [
+            { key:'all',     label:'전체',           value: total,                  cls:'kpi-total',   filter: {} },
+            { key:'A',       label:'Stage A',        value: distribution.A ?? 0,    cls:'kpi-A',       filter:{grade:'A'} },
+            { key:'B',       label:'Stage B',        value: distribution.B ?? 0,    cls:'kpi-B',       filter:{grade:'B'} },
+            { key:'C',       label:'Stage C',        value: distribution.C ?? 0,    cls:'kpi-C',       filter:{grade:'C'} },
+            { key:'pending', label:'분석중/실패',     value: distribution.PENDING ?? 0, cls:'kpi-pending', filter:null },
+            { key:'consult', label:'상담 희망',       value: consult,                cls:'kpi-consult', filter:null }
+        ];
+        document.getElementById('kpi-strip').innerHTML = cards.map(c => `
+            <button type="button" class="kpi-card ${c.cls}" ${c.filter ? `onclick='applyKpiFilter(${JSON.stringify(c.filter)})'` : ''}>
+                <span class="kpi-label">${c.label}</span>
+                <span class="kpi-value">${c.value}</span>
+            </button>`).join('');
+    }
+    function applyKpiFilter(filter) {
+        FILTER_KEYS.forEach(k => { document.getElementById('f-' + k).value = filter[k] || ''; });
+        currentPage = 0; loadLeads();
+    }
+
+    async function refreshKpi() {
+        // KPI: 현재 필터 + size=500 1회 호출로 분포 계산 (그래도 전체 페이지 합산이라 정확)
+        try {
+            const params = buildQuery();
+            params.set('size', '500');
+            params.set('page', '0');
+            const r = await adminApi.get('/api/admin/leads?' + params);
+            const list = r.content || [];
+            const dist = { A:0, B:0, C:0, PENDING:0 };
+            let consult = 0;
+            for (const l of list) {
+                if (l.grade) dist[l.grade] = (dist[l.grade] || 0) + 1;
+                else dist.PENDING++;
+                if (l.consultationPreference) consult++;
+            }
+            renderKpi(dist, r.totalElements ?? list.length, consult);
+        } catch (e) {}
+    }
+
     async function loadLeads() {
+        renderFilterChips();
         try {
             const params = buildQuery();
             const data = await adminApi.get('/api/admin/leads?' + params);
@@ -194,20 +363,21 @@
             document.getElementById('prev-page').disabled = (data.page ?? 0) <= 0;
             document.getElementById('next-page').disabled = (data.page ?? 0) >= totalPages - 1;
 
-            const head = COLUMNS.map(([k, label]) => `<th style="white-space:nowrap;">${label}</th>`).join('');
+            const cols = visibleColumns();
+            const head = cols.map(([k, label]) => {
+                const sticky = (k === 'name') ? 'col-sticky-1' : '';
+                return `<th class="${sticky}">${label}</th>`;
+            }).join('');
             const rows = (data.content || []).map(l => {
-                const cells = COLUMNS.map(([k]) => {
-                    if (k === 'name') return `<td><a href="/admin/leads/${l.id}"><strong>${fmt(l[k])}</strong></a></td>`;
-                    if (k === 'grade') return `<td>${gradeCell(l)}</td>`;
-                    return `<td style="white-space:nowrap;">${fmt(l[k])}</td>`;
-                }).join('');
-                return `<tr>${cells}</tr>`;
+                const cells = cols.map(([k]) => renderCell(l, k)).join('');
+                return `<tr class="${rowStripClass(l)}">${cells}</tr>`;
             }).join('');
             document.getElementById('leads-table').innerHTML = `
-                <table style="min-width: 100%;">
+                <table class="leads-table" style="min-width:100%;">
                     <thead><tr>${head}</tr></thead>
-                    <tbody>${rows || `<tr><td colspan="${COLUMNS.length}" class="muted" style="text-align:center; padding:24px 0;">데이터 없음</td></tr>`}</tbody>
+                    <tbody>${rows || `<tr><td colspan="${cols.length}" class="muted" style="text-align:center; padding:32px 0;">조건에 맞는 리드가 없습니다.</td></tr>`}</tbody>
                 </table>`;
+            refreshKpi();
         } catch (e) {
             document.getElementById('leads-table').innerHTML = '<p class="error" style="padding:16px;">로드 실패: ' + e.message + '</p>';
         }
@@ -215,21 +385,22 @@
 
     function prevPage() { if (currentPage > 0) { currentPage--; loadLeads(); } }
     function nextPage() { if (currentPage < totalPages - 1) { currentPage++; loadLeads(); } }
+    function changePageSize(v) { pageSize = parseInt(v, 10) || 50; currentPage = 0; loadLeads(); }
 
     function clearFilters() {
-        ['eventCode','q','industry','jobFunction','jobLevel','companySize',
-         'employeeCountRange','monitoringStatus','planWithinYear',
-         'consultationPreference','adoptionBlocker','grade']
-            .forEach(k => { document.getElementById('f-' + k).value = ''; });
+        FILTER_KEYS.forEach(k => { document.getElementById('f-' + k).value = ''; });
         currentPage = 0; loadLeads();
     }
 
     async function loadPending() {
         try {
             const data = await adminApi.get('/api/admin/leads/pending-scores');
-            document.getElementById('pending-status').innerHTML =
-                `⚠️ PENDING <strong>${data.pendingCount}</strong>건 / FAILED <strong>${data.failedCount}</strong>건`;
-        } catch (e) { toast(e.message, true); }
+            const total = data.pendingCount + data.failedCount;
+            const box = document.getElementById('pending-status');
+            box.innerHTML = total === 0
+                ? `<span style="color: var(--success);">✓ 분석 대기 없음</span>`
+                : `⚠️ PENDING <strong>${data.pendingCount}</strong>건 · FAILED <strong>${data.failedCount}</strong>건 — <a href="#" onclick="rescore();return false;">일괄 재분석</a>`;
+        } catch (e) {}
     }
 
     async function rescore() {
@@ -262,9 +433,7 @@
 
     async function generateInsight() {
         const filters = currentFilters();
-        // 현재 페이지 데이터로 간단한 세그먼트 집계 (모든 페이지 합산은 추가 호출 필요. 여기선 현재 필터 결과 메타만 던짐.)
         try {
-            // 전체 결과(필터 적용)로 집계: size=500 호출
             const params = buildQuery();
             params.set('size', '500');
             params.set('page', '0');
@@ -298,6 +467,7 @@
             document.getElementById('insight-card').style.display = '';
             document.getElementById('insight-content').textContent = '...';
             document.getElementById('insight-meta').textContent = '생성 중 (LLM 호출, 30초~1분)...';
+            document.getElementById('insight-card').scrollIntoView({ behavior:'smooth', block:'start' });
 
             const r = await adminApi.post('/api/admin/leads/insights', {
                 label: filters.eventCode ? `행사 ${filters.eventCode} 필터된 리드` : '필터된 리드',
@@ -317,16 +487,29 @@
         }
     }
 
-    // 첫 로드
-    loadLeads();
+    // URL 쿼리(?eventCode=&q=&grade=... 등)로 필터 사전 적용 + 필터 패널 자동 펼침
+    (function applyUrlQuery() {
+        const q = new URLSearchParams(window.location.search);
+        let hasFilter = false;
+        FILTER_KEYS.forEach(k => {
+            const v = q.get(k);
+            const e = document.getElementById('f-' + k);
+            if (v != null && e) { e.value = v; hasFilter = true; }
+        });
+        if (hasFilter) document.getElementById('filter-card').open = true;
+    })();
+
+    setView(viewMode);   // 기본 뷰 적용 + loadLeads()
     loadPending();
 
-    // 키워드/필터 변경 시 즉시 조회 (옵션)
+    // 필터 변경 시 즉시 조회
     ['eventCode','industry','jobFunction','jobLevel','companySize','employeeCountRange',
      'monitoringStatus','planWithinYear','consultationPreference','adoptionBlocker','grade']
         .forEach(k => document.getElementById('f-' + k).addEventListener('change', () => { currentPage = 0; loadLeads(); }));
-    document.getElementById('f-q').addEventListener('keydown', e => {
-        if (e.key === 'Enter') { currentPage = 0; loadLeads(); }
+    let qTimer;
+    document.getElementById('f-q').addEventListener('input', e => {
+        clearTimeout(qTimer);
+        qTimer = setTimeout(() => { currentPage = 0; loadLeads(); }, 350);
     });
 </script>
 <div th:replace="~{admin/layout :: scripts}"></div>
