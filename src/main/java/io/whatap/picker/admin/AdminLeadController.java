@@ -223,17 +223,24 @@ public class AdminLeadController {
     }
 
     private Map<String, Object> toListView(Lead l) {
-        return Map.of(
-                "id", l.getId(),
-                "eventId", l.getEventId(),
-                "name", l.getLastName() + l.getFirstName(),
-                "company", l.getCompany() == null ? "" : l.getCompany(),
-                "industry", l.getIndustry(),
-                "jobLevel", l.getJobLevel(),
-                "monitoringStatus", l.getMonitoringStatus(),
-                "createdAt", l.getCreatedAt(),
-                "retentionUntil", l.getRetentionUntil()
-        );
+        // Map.of 는 null value 불가 — null 가능 필드는 HashMap 사용
+        java.util.LinkedHashMap<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("id", l.getId());
+        m.put("eventId", l.getEventId());
+        m.put("name", l.getLastName() + l.getFirstName());
+        m.put("phone", l.getPhone());
+        m.put("email", l.getEmail());
+        m.put("company", l.getCompany() == null ? "" : l.getCompany());
+        m.put("industry", l.getIndustry());
+        m.put("jobFunction", l.getJobFunction());
+        m.put("jobLevel", l.getJobLevel());
+        m.put("monitoringStatus", l.getMonitoringStatus());
+        m.put("planWithinYear", l.getPlanWithinYear());
+        m.put("consultationPreference", l.getConsultationPreference());
+        m.put("interestProducts", l.getInterestProducts());
+        m.put("createdAt", l.getCreatedAt());
+        m.put("retentionUntil", l.getRetentionUntil());
+        return m;
     }
 
     private static String label(Enum<?> e) {

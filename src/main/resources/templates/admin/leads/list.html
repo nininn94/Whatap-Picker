@@ -40,22 +40,28 @@
             const data = await adminApi.get('/api/admin/leads?' + params);
             const rows = (data.content || []).map(l => `
                 <tr>
-                    <td><a href="/admin/leads/${l.id}">${l.name}</a></td>
-                    <td>${l.company || ''}</td>
-                    <td>${l.industry || ''}</td>
-                    <td>${l.jobLevel || ''}</td>
-                    <td>${l.monitoringStatus || ''}</td>
+                    <td><a href="/admin/leads/${l.id}"><strong>${l.name || '-'}</strong></a></td>
+                    <td>${l.phone || '-'}</td>
+                    <td>${l.email || '-'}</td>
+                    <td>${l.company || '-'}</td>
+                    <td>${l.industry || '-'}</td>
+                    <td>${l.jobFunction || '-'}</td>
+                    <td>${l.jobLevel || '-'}</td>
+                    <td>${l.monitoringStatus || '-'}</td>
+                    <td>${l.planWithinYear || '-'}</td>
+                    <td>${l.consultationPreference === 'ONSITE_MEETING' ? '✅' : '-'}</td>
                     <td>${l.grade ? `<span class="grade-${l.grade}">${l.grade}</span>` : (l.aiStatus === 'PENDING' ? '<span class="grade-PENDING">분석중</span>' : '-')}</td>
-                    <td>${l.score ?? '-'}</td>
-                    <td>${new Date(l.createdAt).toLocaleString()}</td>
+                    <td>${l.createdAt ? new Date(l.createdAt).toLocaleString() : '-'}</td>
                 </tr>`).join('');
             document.getElementById('leads-table').innerHTML = `
                 <table>
                     <thead><tr>
-                        <th>이름</th><th>회사</th><th>산업</th><th>직급</th>
-                        <th>모니터링</th><th>AI 등급</th><th>점수</th><th>제출</th>
+                        <th>이름</th><th>휴대폰</th><th>이메일</th><th>회사</th>
+                        <th>산업</th><th>직무</th><th>직급</th>
+                        <th>현재 모니터링</th><th>1년 계획</th><th>상담</th>
+                        <th>AI</th><th>제출</th>
                     </tr></thead>
-                    <tbody>${rows || '<tr><td colspan="8">데이터 없음</td></tr>'}</tbody>
+                    <tbody>${rows || '<tr><td colspan="12">데이터 없음</td></tr>'}</tbody>
                 </table>
                 <p class="muted">총 ${data.totalElements || 0}건</p>`;
         } catch (e) {
