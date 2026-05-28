@@ -72,7 +72,7 @@ public class MarketingInsightService {
             상용 만족도: {commercialSatisfaction}
             교체 이유: {switchReasons}
 
-            [AI 등급 분포]
+            [Lifecycle Stage 분포]
             {gradeDistribution}
             """;
 

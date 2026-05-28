@@ -36,7 +36,7 @@
     <div class="dashboard-grid" id="summary-cards"></div>
 
     <div class="card">
-        <h2>등급 분포</h2>
+        <h2>Lifecycle Stage 분포</h2>
         <canvas id="grade-chart" height="80"></canvas>
     </div>
 
@@ -130,7 +130,7 @@
             if (l.grade) dist[l.grade] = (dist[l.grade] || 0) + 1;
             else dist.PENDING++;
         }
-        renderChart('grade-chart', 'bar', Object.keys(dist), Object.values(dist), '등급 분포');
+        renderChart('grade-chart', 'bar', Object.keys(dist), Object.values(dist), 'Lifecycle Stage 분포');
     }
 
     async function loadAll() {

@@ -6,6 +6,8 @@
     <title th:text="${title} ?: 'WhaTap Picker Admin'">Admin</title>
     <link rel="stylesheet" th:href="@{/css/app.css}">
     <link rel="stylesheet" th:href="@{/css/admin.css}">
+    <!-- adminApi / toast 등이 inline 페이지 스크립트보다 먼저 로드되어야 함. -->
+    <script th:src="@{/js/admin-common.js}"></script>
 </head>
 <body class="admin-body">
 
@@ -51,7 +53,6 @@
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
     <script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-    <script th:src="@{/js/admin-common.js}"></script>
     <script>
         function adminLogout() {
             fetch('/api/auth/logout', { method:'POST', credentials:'same-origin' })

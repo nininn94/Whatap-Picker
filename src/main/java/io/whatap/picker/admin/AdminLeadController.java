@@ -162,7 +162,7 @@ public class AdminLeadController {
         if (req.filters != null) stats.put("적용 필터", req.filters);
         stats.put("총 리드 수", req.totalElements);
         if (req.gradeDistribution != null && !req.gradeDistribution.isEmpty())
-            stats.put("AI 등급 분포", req.gradeDistribution);
+            stats.put("Lifecycle Stage 분포", req.gradeDistribution);
         if (req.segmentCounts != null) req.segmentCounts.forEach(stats::put);
         return insightService.generateForFiltered(
                 req.label == null ? "필터된 리드" : req.label, stats);
