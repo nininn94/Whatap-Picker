@@ -861,8 +861,23 @@ LeadSubmittedEvent 발행
 
 #### 4.6.6 PENDING/FAILED 모니터링
 
-- `GET /api/admin/leads/pending-scores` — PENDING 1시간 이상 + FAILED 목록
-- 어드민 홈 대시보드 카드에 "분석 대기/실패 N건" 표시
+`GET /api/admin/leads/pending-scores` (ADMIN)
+
+**응답**
+```json
+{
+  "pendingCount": 4,
+  "failedCount": 1,
+  "pending": [
+    { "leadId": "uuid", "attemptCount": 1, "lastAttemptedAt": "2026-05-28T10:01:00+09:00" }
+  ],
+  "failed": [
+    { "leadId": "uuid", "attemptCount": 3, "reason": "AI 분석 보류: 타임아웃" }
+  ]
+}
+```
+
+- 어드민 홈 대시보드 카드에 "분석 대기/실패 N건" 표시 (`pendingCount + failedCount`)
 - (Phase 9 확장) Slack/메일 알림 — `@Scheduled` 15분마다 체크
 
 #### 4.6.7 PENDING 자동 파기 정책
@@ -983,13 +998,50 @@ class LeadScoringPipeline {
 - `DELETE /api/admin/users/{id}`
 
 ### 리드 조회
-- `GET /api/admin/leads?eventDate=&grade=&industry=&jobLevel=&monitoringStatus=&planWithinYear=&page=&size=` — 페이징 + 다중 필터
+
+#### `GET /api/admin/leads`
+**쿼리 파라미터** — 모두 선택. 미지정 시 전체.
+- `eventCode` (행사 코드. 단일 행사 선택)
+- `industry`, `jobLevel`, `monitoringStatus`, `planWithinYear` (enum)
+- `grade` (A/B/C — AI 등급)
+- `page` (기본 0), `size` (기본 50)
+
+**응답**
+```json
+{
+  "content": [
+    {
+      "id": "uuid",
+      "eventId": "uuid",
+      "name": "홍길동",
+      "company": "와탭랩스",
+      "industry": "IT_SERVICES",
+      "jobLevel": "STAFF",
+      "monitoringStatus": "USING_OTHER",
+      "createdAt": "...",
+      "retentionUntil": "2028-05-28",
+      "aiStatus": "DONE",
+      "grade": "B",
+      "score": 68
+    }
+  ],
+  "totalElements": 142,
+  "totalPages": 3,
+  "page": 0,
+  "size": 50
+}
+```
+
+- `aiStatus`/`grade`/`score`는 `LeadScore`가 있는 리드만 포함
+- `grade` 필터는 응답 결과에서 등급으로 1차 필터링 (Specification → in-memory)
+
+#### 그 외
 - `GET /api/admin/leads/{id}` — 상세 (설문 + 추첨 + AI 등급 묶음, `survey_payload` 포함)
-- `DELETE /api/admin/leads/expired` — 보존 기간(2년) 만료 리드 일괄 파기
+- `DELETE /api/admin/leads/expired` — 보존 기간(2년) 만료 리드 일괄 파기 → `{"deleted": n}`
 
 ### 리드 CSV 다운로드 — `GET /api/admin/leads/export.csv`
 
-쿼리 파라미터(목록 조회와 동일): `eventDate`, `grade`, `industry`, `jobLevel`, `monitoringStatus`, `planWithinYear`, `from`, `to`, `consultationPreference`
+쿼리 파라미터(목록 조회와 동일): `eventCode`, `industry`, `jobLevel`, `monitoringStatus`, `planWithinYear`, `grade`, `from`, `to`, `consultationPreference`
 
 **응답 헤더**
 ```
@@ -1040,15 +1092,15 @@ AI 등급, AI 사유, AI 후속액션, AI 산출 시각,
 
 집계 결과도 CSV로 받을 수 있도록 — 마케터가 엑셀에서 가공할 때 편함.
 
-| 엔드포인트 | 내용 |
-| --- | --- |
-| `GET /api/admin/dashboard/export/summary.csv?eventDate=` | 요약 카드 한 줄 |
-| `GET /api/admin/dashboard/export/timeline.csv?from=&to=` | 일자별 시계열 |
-| `GET /api/admin/dashboard/export/segments.csv?eventDate=` | 산업/직무/직급/기업규모/모니터링 분포 long format |
-| `GET /api/admin/dashboard/export/monitoring.csv?eventDate=` | 모니터링 제품·만족도·교체이유 |
-| `GET /api/admin/dashboard/export/intent.csv?eventDate=` | 관심 제품·1년 내 계획·미팅 희망 |
+| 엔드포인트 | 파라미터 | 컬럼 |
+| --- | --- | --- |
+| `GET /api/admin/dashboard/export/summary.csv` | `eventCode` | 이벤트 코드 / 이벤트 일자 / 총 리드 / 추첨 / 상담 희망 / 유효 메일 비율 / 거부 이메일 |
+| `GET /api/admin/dashboard/export/timeline.csv` | `from`, `to` | 일자 / 제출 / 추첨 / 상담 희망 |
+| `GET /api/admin/dashboard/export/segments.csv` | `eventCode` | 세그먼트(industry/jobFunction/jobLevel/companySize/monitoringStatus) / 값 / 건수 (long-format) |
+| `GET /api/admin/dashboard/export/monitoring.csv` | `eventCode` | 그룹(commercialProductUsage/openSourceUsage/commercialSatisfaction/switchReasons/adoptionBlockers) / 값 / 건수 |
+| `GET /api/admin/dashboard/export/intent.csv` | `eventCode` | 그룹(interestProducts/planWithinYear/consultationPreference/adoptionBlocker) / 값 / 건수 |
 
-모두 동일한 헤더 규약 (UTF-8 BOM, RFC 4180, 한국어 라벨, 첫 줄 헤더).
+공통 규약: UTF-8 BOM, RFC 4180, `Content-Disposition: attachment; filename="dashboard-*.csv"`, 한국어 헤더, `StreamingResponseBody`.
 
 ### 4.B 풀 대시보드 API (ADMIN)
 
@@ -1334,13 +1386,23 @@ URL 변경 시 (예: `event_code` 변경) QR 캐시 무효화 + 재생성.
 - `POST /api/admin/ai-prompts/{id}/activate` — 활성화 (다른 프롬프트 자동 비활성화)
 - `POST /api/admin/ai-prompts/{id}/test` — 샘플 Lead로 LLM 응답 테스트
 
-### 4.F.3 일괄 재분석 — `POST /api/admin/leads/rescore`
+### 4.F.3 일괄 재분석 — `POST /api/admin/leads/rescore` (ADMIN)
 
+**Request**
 ```json
-{ "eventId": "uuid", "force": true, "filter": { "aiStatus": "FAILED" } }
+{ "eventCode": "devops-day-2026", "aiStatus": "FAILED" }
 ```
 
-PENDING/FAILED 또는 특정 행사 전체를 큐에 다시 넣음. 큐는 백그라운드 워커가 rate limit 지키며 처리.
+- `eventCode` (선택): 특정 행사만 대상. 미지정 시 전 행사
+- `aiStatus` (선택): 특정 상태만 (`PENDING`/`FAILED`). 미지정 시 PENDING + FAILED 모두
+
+**Response**
+```json
+{ "queued": 27 }
+```
+
+- 큐잉된 건수 반환. 처리는 비동기(`@Async` + `@Retryable`).
+- 처리 결과는 `LeadScore.ai_status` 폴링 또는 `/api/admin/leads/pending-scores`로 추적.
 
 ---
 
@@ -1888,4 +1950,4 @@ curl http://localhost:8080/actuator/health
 
 ---
 
-*이 계획서는 v9 (스펙↔코드 정합성 검증: eventCode 통일, leads 필터 보강, regenerate-qr/pending-scores/rescore/대시보드 CSV 5종 추가) 입니다.*
+*이 계획서는 v9.1 (코드와 일치하도록 신규 endpoint 4종 상세 명세 보강: leads 필터 응답 형식, pending-scores 응답, rescore 응답, 대시보드 CSV 컬럼) 입니다.*
