@@ -5,6 +5,17 @@
 
 ---
 
+## 개발 문서
+
+| 문서 | 내용 |
+| --- | --- |
+| [`docs/API.md`](./docs/API.md) | 코드 기반 REST API 스펙 (공개/어드민/대시보드/SSR) |
+| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | 서버 구조, 소스 트리, 요청 흐름, 비동기 처리, 보안 |
+| [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) | AWS EC2 + GitHub Actions 배포 가이드 |
+| [`docs/archive/`](./docs/archive) | 초기 기획·시나리오·구버전 명세 (현재 코드와 일부 어긋날 수 있음, 히스토리 용도) |
+
+---
+
 ## 팀 구성
 
 | 이름 | 소속 |

@@ -21,16 +21,15 @@ Whatap Picker는 오프라인 부스 리드 모객을 위한 QR 기반 이벤트
 
 | 문서 | 위치 | 용도 |
 | --- | --- | --- |
-| 해커톤 기획안 | [`ai-hackathon-lead-draw-plan.md`](./ai-hackathon-lead-draw-plan.md) | 서비스 문제 정의, MVP 범위, 사용자 흐름, 정책 논의 |
-| 해커톤 기획안 PDF | [`ai-hackathon-lead-draw-plan.pdf`](./ai-hackathon-lead-draw-plan.pdf) | 공유/발표용 PDF |
-| 백엔드 개발 계획 | [`backend-development-plan.md`](./backend-development-plan.md) | Spring Boot API, 데이터 모델, 추첨 로직, 테스트 전략 |
-| AI 코딩 시나리오 | [`ai-coding-scenarios.md`](./ai-coding-scenarios.md) | AI 코딩 도구용 화면 흐름, 운영 시나리오, 데모 흐름 |
+| API 스펙 | [`docs/API.md`](./docs/API.md) | 코드 기반 현행 REST API 명세 (공개/어드민/대시보드/SSR) |
+| 서버 아키텍처 | [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | 기술 스택, 소스 구조, 요청 흐름, 보안 |
+| 배포 가이드 | [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) | AWS EC2 + GitHub Actions 배포 |
 | 프론트엔드 README | [`frontend/README.md`](./frontend/README.md) | 프론트엔드 실행 방법과 현재 기능 요약 |
+| 초기 기획/시나리오 (아카이브) | [`docs/archive/`](./docs/archive) | 해커톤 기획안·시나리오·초기 백엔드 계획. 현행 코드와 차이 있을 수 있음 |
 
 ## 작업 기준
 
 - 모든 작업 내용은 작은 단위로 나누고, 각 단위가 완료되면 `main` 브랜치에 푸시하면서 진행합니다.
-- 새 구현은 [`ai-coding-scenarios.md`](./ai-coding-scenarios.md)의 시나리오와 완료 기준을 우선 확인합니다.
-- 실제 API, 데이터 모델, 기술 스택을 확정해야 할 때만 [`backend-development-plan.md`](./backend-development-plan.md)를 참고합니다.
-- 서비스 목적, MVP 범위, 운영 정책은 [`ai-hackathon-lead-draw-plan.md`](./ai-hackathon-lead-draw-plan.md)를 기준으로 해석합니다.
+- 새 구현의 사실 기준은 [`docs/API.md`](./docs/API.md) 와 [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md). 두 문서는 코드 변경 시 함께 갱신합니다.
+- 초기 기획 의도/배경 확인이 필요할 때만 [`docs/archive/`](./docs/archive) 를 참고합니다.
 - 기존 문서와 충돌하는 변경은 먼저 충돌 지점을 명시하고 결정이 필요한 항목으로 분리합니다.
