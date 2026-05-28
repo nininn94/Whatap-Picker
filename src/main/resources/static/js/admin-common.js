@@ -42,16 +42,28 @@ const adminApi = (() => {
             const h = { 'Accept': '*/*' };
             if (token()) h['Authorization'] = 'Bearer ' + token();
             const res = await fetch(path, { credentials:'same-origin', headers: h });
-            if (!res.ok) throw new Error(`다운로드 실패 (${res.status})`);
+            if (!res.ok) {
+                let msg = `다운로드 실패 (${res.status})`;
+                try { const t = await res.text(); const j = JSON.parse(t); if (j.message) msg = j.message; } catch {}
+                throw new Error(msg);
+            }
             const cd = res.headers.get('Content-Disposition') || '';
-            const m = cd.match(/filename="(.+?)"/);
-            const name = filename || (m ? m[1] : 'download.csv');
+            const m = cd.match(/filename="?([^";]+)"?/i);
+            const name = filename || (m ? decodeURIComponent(m[1]) : 'download.csv');
             const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
+            a.href = url;
             a.download = name;
+            a.rel = 'noopener';
+            document.body.appendChild(a);
             a.click();
-            URL.revokeObjectURL(a.href);
+            // Chrome 은 blob URL 을 다운로드 도중에도 참조하므로 즉시 revoke 하면
+            // ERR_NAME_NOT_RESOLVED / "blob 을 찾을 수 없음" 으로 실패. 1.5초 지연.
+            setTimeout(() => {
+                a.remove();
+                URL.revokeObjectURL(url);
+            }, 1500);
         }
     };
 })();
