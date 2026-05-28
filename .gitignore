@@ -4,3 +4,22 @@
 *.png
 *.jpg
 *.jpeg
+
+# Gradle / IDE / build artifacts
+.gradle/
+build/
+.idea/
+*.iml
+out/
+target/
+.vscode/
+
+# Java
+*.class
+*.jar
+hs_err_pid*
+
+# Env / secrets
+.env
+.env.local
+*.local.yml
