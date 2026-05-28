@@ -104,4 +104,17 @@ public class AdminEventController {
         }
         eventRepository.delete(event);
     }
+
+    @PostMapping("/{id}/regenerate-qr")
+    public Map<String, Object> regenerateQr(@PathVariable UUID id) {
+        Event event = eventRepository.findById(id)
+                .orElseThrow(() -> new ApiException(ErrorCode.EVENT_NOT_FOUND));
+        // 캐시된 QR 경로 무효화 — 다음 요청 시 새로 생성
+        event.setQrImagePath(null);
+        eventRepository.save(event);
+        return Map.of(
+                "eventCode", event.getEventCode(),
+                "qrUrl", "/event/" + event.getEventCode() + "/qr.png"
+        );
+    }
 }

@@ -1,7 +1,8 @@
 package io.whatap.picker.admin;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.whatap.picker.ai.LeadScoreRepository;
+import io.whatap.picker.ai.enums.Grade;
 import io.whatap.picker.csv.CsvWriter;
 import io.whatap.picker.draw.DrawHistory;
 import io.whatap.picker.draw.DrawHistoryRepository;
@@ -9,8 +10,11 @@ import io.whatap.picker.event.Event;
 import io.whatap.picker.event.EventRepository;
 import io.whatap.picker.lead.Lead;
 import io.whatap.picker.lead.LeadRepository;
+import io.whatap.picker.lead.LeadSpecifications;
+import io.whatap.picker.lead.enums.*;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -37,43 +41,66 @@ public class AdminLeadController {
     private final LeadRepository leadRepository;
     private final EventRepository eventRepository;
     private final DrawHistoryRepository drawHistoryRepository;
+    private final LeadScoreRepository leadScoreRepository;
     private final ObjectMapper objectMapper;
 
     public AdminLeadController(LeadRepository leadRepository,
                                EventRepository eventRepository,
                                DrawHistoryRepository drawHistoryRepository,
+                               LeadScoreRepository leadScoreRepository,
                                ObjectMapper objectMapper) {
         this.leadRepository = leadRepository;
         this.eventRepository = eventRepository;
         this.drawHistoryRepository = drawHistoryRepository;
+        this.leadScoreRepository = leadScoreRepository;
         this.objectMapper = objectMapper;
     }
 
     @GetMapping
     public Map<String, Object> list(@RequestParam(required = false) String eventCode,
+                                    @RequestParam(required = false) Industry industry,
+                                    @RequestParam(required = false) JobLevel jobLevel,
+                                    @RequestParam(required = false) MonitoringStatus monitoringStatus,
+                                    @RequestParam(required = false) PlanWithinYear planWithinYear,
+                                    @RequestParam(required = false) Grade grade,
                                     @RequestParam(defaultValue = "0") int page,
                                     @RequestParam(defaultValue = "50") int size) {
-        Page<Lead> result;
+
+        UUID eventId = null;
         if (eventCode != null && !eventCode.isBlank()) {
             Event event = eventRepository.findByEventCode(eventCode).orElse(null);
-            if (event == null) {
-                return Map.of("content", List.of(), "totalElements", 0L);
-            }
-            result = leadRepository.findAll(PageRequest.of(page, size));
-            // 간단화: 전체 Page에서 필터링. 대량 시 별도 쿼리 메서드로 교체.
-            List<Lead> filtered = result.stream()
-                    .filter(l -> l.getEventId().equals(event.getId()))
-                    .toList();
-            return Map.of(
-                    "content", filtered.stream().map(this::toListView).toList(),
-                    "totalElements", (long) filtered.size()
-            );
+            if (event == null) return Map.of("content", List.of(), "totalElements", 0L);
+            eventId = event.getId();
         }
-        result = leadRepository.findAll(PageRequest.of(page, size));
+
+        Specification<Lead> spec = Specification.allOf(
+                LeadSpecifications.eventId(eventId),
+                LeadSpecifications.industry(industry),
+                LeadSpecifications.jobLevel(jobLevel),
+                LeadSpecifications.monitoringStatus(monitoringStatus),
+                LeadSpecifications.planWithinYear(planWithinYear)
+        );
+        Page<Lead> result = leadRepository.findAll(spec, PageRequest.of(page, size));
+
+        List<Map<String, Object>> rows = result.getContent().stream().<Map<String,Object>>map(l -> {
+            Map<String, Object> row = new java.util.HashMap<>(toListView(l));
+            leadScoreRepository.findByLeadId(l.getId()).ifPresent(s -> {
+                row.put("aiStatus", s.getAiStatus());
+                row.put("grade", s.getGrade());
+                row.put("score", s.getScore());
+            });
+            return row;
+        }).filter(row -> {
+            if (grade == null) return true;
+            return grade.equals(row.get("grade"));
+        }).toList();
+
         return Map.of(
-                "content", result.getContent().stream().map(this::toListView).toList(),
+                "content", rows,
                 "totalElements", result.getTotalElements(),
-                "totalPages", result.getTotalPages()
+                "totalPages", result.getTotalPages(),
+                "page", result.getNumber(),
+                "size", result.getSize()
         );
     }
 

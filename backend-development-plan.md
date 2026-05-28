@@ -677,10 +677,11 @@ else                                    → 회사 메일 강제 (차단 도메�
 { "rank": null, "prizeName": null, "outOfStock": true, "drawnAt": "...", "drawnBy": {...} }
 ```
 
-### 4.4 경품 현황 — `GET /api/prizes?eventDate=2026-05-28` (OPERATOR/ADMIN)
+### 4.4 경품 현황 — `GET /api/prizes?eventCode={}` (OPERATOR/ADMIN)
 
 ```json
 {
+  "eventCode": "devops-day-2026",
   "eventDate": "2026-05-28",
   "prizes": [
     { "rank": 1, "name": "AirPods", "initial": 2, "awarded": 1, "remaining": 1 }
@@ -688,7 +689,7 @@ else                                    → 회사 메일 강제 (차단 도메�
 }
 ```
 
-### 4.5 참여 이력 — `GET /api/draw/history?leadId={}&eventDate={}` (OPERATOR/ADMIN)
+### 4.5 참여 이력 — `GET /api/draw/history?leadId={}&eventCode={}` (OPERATOR/ADMIN)
 
 ### 4.6 AI 리드 등급 (룰 선적용 + LLM 폴백)
 
@@ -1295,6 +1296,11 @@ ZXing으로 PNG 생성. 첫 호출 시 `event.qr_image_path`에 캐시.
 
 URL 변경 시 (예: `event_code` 변경) QR 캐시 무효화 + 재생성.
 
+응답:
+```json
+{ "eventCode": "devops-day-2026", "qrUrl": "/event/devops-day-2026/qr.png" }
+```
+
 ---
 
 ## 4.F AI 룰 / 프롬프트 관리 API (ADMIN)
@@ -1882,4 +1888,4 @@ curl http://localhost:8080/actuator/health
 
 ---
 
-*이 계획서는 화요일 개발 논의용 v8 (Spring Boot 4 + Spring AI 1.x 도입, ChatClient 구조화 출력, JSON 파싱 코드 제거) 입니다.*
+*이 계획서는 v9 (스펙↔코드 정합성 검증: eventCode 통일, leads 필터 보강, regenerate-qr/pending-scores/rescore/대시보드 CSV 5종 추가) 입니다.*
