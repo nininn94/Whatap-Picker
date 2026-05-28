@@ -317,8 +317,8 @@ export default function App() {
             onSubmit={submitParticipant}
           >
             <div className="mb-6">
-              <Badge className="mb-3 px-3 py-1 text-sm">참여자 확인</Badge>
-              <h1 className="text-2xl font-bold tracking-normal text-foreground">설문 참여 정보 입력</h1>
+              <Badge className="mb-3 px-3 py-1 text-sm">와탭 뽑기 이벤트</Badge>
+              <h1 className="text-2xl font-bold tracking-normal text-foreground">제출하신 설문 정보를 입력해 주세요.</h1>
             </div>
 
             <div className="space-y-5">
@@ -380,7 +380,7 @@ export default function App() {
             ) : null}
 
             <Button type="submit" className="mt-6 h-12 w-full gap-2 text-base" disabled={isCheckingParticipant}>
-              {isCheckingParticipant ? "확인 중" : "뽑기 시작"}
+              {isCheckingParticipant ? "확인 중" : "이벤트 참여하기"}
               <ArrowRight className="size-4" aria-hidden="true" />
             </Button>
           </form>
