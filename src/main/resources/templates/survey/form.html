@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{fragments/layout :: head(title=${schema.title.asText() + ' - ' + event.label})}"></head>
+<head th:replace="~{fragments/layout :: head(title=${schema.get('title').asText() + ' - ' + event.label})}"></head>
 <body class="survey">
 <main class="container" x-data="surveyForm()">
 
     <header class="survey-header">
-        <h1 th:text="${schema.title.asText()}">WhaTap 설문 이벤트</h1>
-        <p class="muted" th:text="${schema.subtitle.asText()}"></p>
+        <h1 th:text="${schema.get('title').asText()}">WhaTap 설문 이벤트</h1>
+        <p class="muted" th:text="${schema.get('subtitle').asText()}"></p>
         <p class="event-label" th:text="${event.label}"></p>
     </header>
 

@@ -62,10 +62,6 @@ public class FormTemplateService {
 
     public void update(UUID id, String name, JsonNode schema, int expectedVersion) {
         FormTemplate template = get(id);
-        if (template.isSystemDefault()) {
-            throw new ApiException(ErrorCode.LOCKED_TEMPLATE,
-                    "시스템 기본 템플릿은 수정할 수 없습니다. 먼저 복사하세요.");
-        }
         if (!template.getVersion().equals(expectedVersion)) {
             throw new ApiException(ErrorCode.IN_USE, "다른 사용자에 의해 변경되었습니다. 새로 고침 후 다시 시도하세요.");
         }
@@ -78,7 +74,9 @@ public class FormTemplateService {
     public void delete(UUID id) {
         FormTemplate template = get(id);
         if (template.isSystemDefault()) {
-            throw new ApiException(ErrorCode.LOCKED_TEMPLATE, "시스템 기본 템플릿은 삭제할 수 없습니다.");
+            // 참조 무결성 안전장치: 시드 폼은 삭제 금지 (다른 행사가 fallback 으로 참조 중일 수 있음)
+            throw new ApiException(ErrorCode.LOCKED_TEMPLATE,
+                    "시스템 기본 템플릿은 삭제할 수 없습니다 (편집은 가능).");
         }
         repository.delete(template);
     }
