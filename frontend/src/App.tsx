@@ -16,32 +16,24 @@ import { Label } from "@/components/ui/label";
 import {
   DrawApiError,
   drawPrize,
+  fetchAdminEvents,
   fetchDrawHistory,
   fetchPrizeInventory,
   searchLeads,
+  type ApiEvent,
   type ApiPrize,
   type DrawResponse,
   type LeadSearchItem,
 } from "@/lib/draw-api";
 
-type BoardPattern = "scatter" | "rising" | "spike";
-
-const STORAGE_KEY = "whatap-picker-display-v9";
+const PICKED_CELLS_STORAGE_KEY = "whatap-picker-display-v8";
 const EVENT_CODE_STORAGE_KEY = "whatap-picker-selected-event-code";
-const EVENT_CODE_OPTIONS_STORAGE_KEY = "whatap-picker-event-codes";
 const BOARD_COLUMNS = 50;
 const BOARD_ROWS = 10;
 const BOARD_CELL_COUNT = BOARD_COLUMNS * BOARD_ROWS;
-const MAX_EVENT_CODE_OPTIONS = 8;
 const TEST_PARTICIPANT_NAME = "whatap";
 const TEST_PARTICIPANT_PHONE_LAST_FOUR = "1111";
 const RESULT_HOLD_DURATION_MS = 1500;
-const DEFAULT_BOARD_PATTERN: BoardPattern = "scatter";
-const BOARD_PATTERN_OPTIONS: { id: BoardPattern; label: string; description: string }[] = [
-  { id: "scatter", label: "분산형", description: "전역 산포" },
-  { id: "rising", label: "상승형", description: "계단 상승" },
-  { id: "spike", label: "스파이크형", description: "중앙 집중" },
-];
 
 type Prize = {
   rank: string;
@@ -61,8 +53,8 @@ type PickResult = {
 };
 
 type PickerState = {
+  eventCode?: string;
   eventTitle: string;
-  pattern: BoardPattern;
   prizes: Prize[];
   cells: PickerCell[];
   results: PickResult[];
@@ -92,6 +84,8 @@ type LeadOption = LeadSearchItem & {
   eventDate: string;
 };
 
+type PickedCellsByEvent = Record<string, number[]>;
+
 const defaultPrizes: Prize[] = [
   { rank: "1등", name: "프리미엄 굿즈", count: 10 },
   { rank: "2등", name: "텀블러", count: 40 },
@@ -100,27 +94,35 @@ const defaultPrizes: Prize[] = [
   { rank: "5등", name: "참가 기념품", count: 200 },
 ];
 
-const mockTestPrizes: Prize[] = defaultPrizes.map((prize) => ({
-  ...prize,
-  name: `Mock ${prize.name}`,
-}));
+function createDefaultState(
+  prizes: Prize[] = defaultPrizes,
+  eventCode = "",
+  pickedCellIndexes: number[] = [],
+  remainingCount = prizeTotalOf(prizes),
+): PickerState {
+  const normalizedPrizes = normalizePrizes(prizes);
 
-function createDefaultState(pattern: BoardPattern = DEFAULT_BOARD_PATTERN): PickerState {
   return {
+    eventCode,
     eventTitle: "Whatap 경품 뽑기",
-    pattern,
-    prizes: defaultPrizes,
-    cells: buildCells(defaultPrizes, pattern),
+    prizes: normalizedPrizes,
+    cells: applyPickedAndStockLimit(
+      buildCells(normalizedPrizes),
+      eventCode,
+      pickedCellIndexes,
+      remainingCount,
+    ),
     results: [],
   };
 }
 
 export default function App() {
   const [state, setState] = useState<PickerState>(() => loadState());
-  const [selectedPattern, setSelectedPattern] = useState<BoardPattern>(() => state.pattern);
   const [eventCode, setEventCode] = useState("");
   const [eventCodeDraft, setEventCodeDraft] = useState("");
-  const [eventCodeOptions, setEventCodeOptions] = useState<string[]>([]);
+  const [adminEvents, setAdminEvents] = useState<ApiEvent[]>([]);
+  const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+  const [eventListError, setEventListError] = useState("");
   const [selectedEventDate, setSelectedEventDate] = useState("");
   const [prizeInventory, setPrizeInventory] = useState<ApiPrize[]>([]);
   const [isLoadingPrizes, setIsLoadingPrizes] = useState(false);
@@ -144,14 +146,18 @@ export default function App() {
   const resultTimerRef = useRef<number | null>(null);
   const drawEffectRef = useRef<HTMLVideoElement | null>(null);
 
+  const syncBoardWithInventory = useCallback((nextEventCode: string, nextPrizes: Prize[], remainingCount: number) => {
+    const pickedCellIndexes = readPickedCellIndexes(nextEventCode);
+    setState(createDefaultState(nextPrizes, nextEventCode, pickedCellIndexes, remainingCount));
+  }, []);
+
   useEffect(() => {
     const timerId = window.setTimeout(() => {
       const nextEventCode = readEventCode();
       setEventCode(nextEventCode);
       setEventCodeDraft(nextEventCode);
-      setEventCodeOptions(readEventCodeOptions(nextEventCode));
       if (nextEventCode) {
-        setEventCodeOptions(rememberEventCode(nextEventCode));
+        rememberEventCode(nextEventCode);
       }
     }, 0);
 
@@ -166,6 +172,17 @@ export default function App() {
       const response = await fetchPrizeInventory(nextEventCode);
       setPrizeInventory(response.prizes);
       setSelectedEventDate(response.eventDate);
+      const nextPrizes = prizesFromInventory(response.prizes);
+
+      if (nextPrizes.length > 0) {
+        const total = prizeTotalOf(nextPrizes);
+        if (total === BOARD_CELL_COUNT) {
+          syncBoardWithInventory(response.eventCode, nextPrizes, remainingTotalOf(response.prizes));
+        } else {
+          setPrizeError(`경품 수량 합계가 ${total}개입니다. 뽑기판은 ${BOARD_CELL_COUNT}개가 필요합니다.`);
+        }
+      }
+
       setParticipant((current) =>
         current && current.eventCode === response.eventCode
           ? { ...current, eventDate: response.eventDate }
@@ -178,7 +195,30 @@ export default function App() {
     } finally {
       setIsLoadingPrizes(false);
     }
-  }, []);
+  }, [syncBoardWithInventory]);
+
+  const loadAdminEvents = useCallback(async () => {
+    setIsLoadingEvents(true);
+    setEventListError("");
+
+    try {
+      const response = await fetchAdminEvents();
+      setAdminEvents(response);
+      setEventCodeDraft((current) => {
+        const currentCode = current.trim() || eventCode.trim();
+        if (currentCode && response.some((item) => item.eventCode === currentCode)) {
+          return currentCode;
+        }
+
+        return response[0]?.eventCode ?? currentCode;
+      });
+    } catch (error) {
+      setAdminEvents([]);
+      setEventListError(apiErrorMessage(error, "이벤트 목록을 불러오지 못했습니다."));
+    } finally {
+      setIsLoadingEvents(false);
+    }
+  }, [eventCode]);
 
   useEffect(() => {
     if (!eventCode) return;
@@ -188,6 +228,15 @@ export default function App() {
 
     return () => window.clearTimeout(timerId);
   }, [eventCode, loadPrizeInventory]);
+
+  useEffect(() => {
+    if (!isTestMode) return;
+    const timerId = window.setTimeout(() => {
+      void loadAdminEvents();
+    }, 0);
+
+    return () => window.clearTimeout(timerId);
+  }, [isTestMode, loadAdminEvents]);
 
   useEffect(() => {
     return () => {
@@ -212,18 +261,27 @@ export default function App() {
 
   function updateState(nextState: PickerState) {
     setState(nextState);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
   }
 
-  function resetPickedState(pattern: BoardPattern = selectedPattern) {
+  function resetPickedState(prizesOverride?: Prize[], eventCodeOverride = eventCode, shouldClearPicked = true) {
     clearRevealTimer();
     if (resultTimerRef.current !== null) {
       window.clearTimeout(resultTimerRef.current);
       resultTimerRef.current = null;
     }
 
-    const nextState = createDefaultState(pattern);
-    setSelectedPattern(pattern);
+    if (shouldClearPicked) {
+      clearPickedCellIndexes(eventCodeOverride);
+    }
+
+    const inventoryPrizes = prizesFromInventory(prizeInventory);
+    const nextPrizes =
+      prizesOverride ??
+      (prizeTotalOf(inventoryPrizes) === BOARD_CELL_COUNT ? inventoryPrizes : state.prizes);
+    const pickedCellIndexes = shouldClearPicked ? [] : readPickedCellIndexes(eventCodeOverride);
+    const remainingCount =
+      prizesOverride || prizeInventory.length === 0 ? prizeTotalOf(nextPrizes) : remainingTotalOf(prizeInventory);
+    const nextState = createDefaultState(nextPrizes, eventCodeOverride, pickedCellIndexes, remainingCount);
     updateState(nextState);
     setDrawError("");
     setSelectedResult(null);
@@ -251,7 +309,7 @@ export default function App() {
     }
 
     if (!eventCode) {
-      setParticipantError("URL에 eventCode 파라미터가 필요합니다.");
+      setParticipantError("행사를 먼저 선택해주세요.");
       return;
     }
 
@@ -336,7 +394,7 @@ export default function App() {
 
     setEventCode(nextEventCode);
     setEventCodeDraft(nextEventCode);
-    setEventCodeOptions(rememberEventCode(nextEventCode));
+    rememberEventCode(nextEventCode);
     updateEventCodeInUrl(nextEventCode);
     setPrizeInventory([]);
     setSelectedEventDate("");
@@ -346,7 +404,7 @@ export default function App() {
     setParticipant((current) =>
       current ? { ...current, eventCode: nextEventCode, eventDate: undefined } : current,
     );
-    resetPickedState(selectedPattern);
+    resetPickedState(defaultPrizes, nextEventCode, false);
   }
 
   async function selectLeadOption(lead: LeadOption) {
@@ -434,7 +492,7 @@ export default function App() {
 
   function pickMockCell(index: number, currentParticipant: Participant, prizeOverride?: Prize) {
     const cell = state.cells[index];
-    if (!cell || cell.picked || isRevealing) return;
+    if (!cell || cell.picked || cell.empty || isRevealing) return;
 
     const result: PickResult = {
       id: `${cell.id}-mock`,
@@ -457,6 +515,7 @@ export default function App() {
         : item,
     );
 
+    rememberPickedCellIndex(currentParticipant.eventCode || eventCode, index);
     setActivePickKey(cell.id);
     setIsRevealing(true);
     clearRevealTimer();
@@ -479,10 +538,10 @@ export default function App() {
 
     const candidates = state.cells
       .map((cell, index) => ({ cell, index }))
-      .filter(({ cell }) => !cell.picked && cell.tone !== "white");
+      .filter(({ cell }) => !cell.picked && !cell.empty && cell.tone !== "white");
     const fallbackCandidates = state.cells
       .map((cell, index) => ({ cell, index }))
-      .filter(({ cell }) => !cell.picked);
+      .filter(({ cell }) => !cell.picked && !cell.empty);
     const pickableCells = candidates.length > 0 ? candidates : fallbackCandidates;
 
     if (pickableCells.length === 0) {
@@ -496,7 +555,7 @@ export default function App() {
 
   async function pickCell(index: number) {
     const cell = state.cells[index];
-    if (!cell || cell.picked || isRevealing || !participant) return;
+    if (!cell || cell.picked || cell.empty || isRevealing || !participant) return;
 
     if (isTestMode) {
       pickMockCell(index, participant);
@@ -526,6 +585,7 @@ export default function App() {
       );
       const remainingRevealMs = Math.max(0, PICK_REVEAL_DURATION_MS - (window.performance.now() - startedAt));
 
+      rememberPickedCellIndex(participant.eventCode || eventCode, index);
       revealTimerRef.current = window.setTimeout(() => {
         updateState({
           ...state,
@@ -590,6 +650,14 @@ export default function App() {
     phoneLastFour: digitsOnly(participantForm.phoneLastFour).slice(0, 4),
   });
   const canSubmitParticipant = !isCheckingParticipant && (Boolean(eventCode) || isManagementPatternEntered);
+  const selectedAdminEventCode = adminEvents.some((item) => item.eventCode === eventCodeDraft.trim())
+    ? eventCodeDraft.trim()
+    : "";
+  const canApplyEventSelection = !isLoadingEvents && Boolean(selectedAdminEventCode);
+  const mockTestPrizes = state.prizes.map((prize) => ({
+    ...prize,
+    name: `Mock ${prize.name}`,
+  }));
 
   const resultOverlay = selectedResult ? (
     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center">
@@ -721,7 +789,7 @@ export default function App() {
             ) : null}
             {!eventCode && !isManagementPatternEntered ? (
               <p className="mt-4 text-sm font-medium text-destructive">
-                URL에 eventCode 파라미터가 필요합니다.
+                행사를 먼저 선택해주세요.
               </p>
             ) : null}
 
@@ -764,7 +832,7 @@ export default function App() {
       <main className="flex h-screen min-h-screen flex-col overflow-hidden bg-background px-5 pb-5 pt-4">
         <header className="flex h-[92px] shrink-0 items-center justify-between gap-4">
           <div className="flex w-[180px] justify-start">
-            <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => resetPickedState(selectedPattern)}>
+            <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => resetPickedState()}>
               <RotateCcw className="size-3.5" aria-hidden="true" />
               초기화
             </Button>
@@ -817,59 +885,35 @@ export default function App() {
               </Button>
             </div>
 
-            <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr_1.4fr]">
+            <div className="grid gap-4 xl:grid-cols-[1.1fr_1.4fr]">
               <div>
                 <div className="mb-2 text-sm font-semibold text-foreground">이벤트 선택</div>
                 <form className="space-y-2" onSubmit={submitEventSelection}>
-                  {eventCodeOptions.length > 0 ? (
-                    <select
-                      aria-label="최근 이벤트 선택"
-                      value={eventCodeOptions.includes(eventCodeDraft) ? eventCodeDraft : ""}
-                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm font-medium"
-                      disabled={isRevealing}
-                      onChange={(event) => setEventCodeDraft(event.target.value)}
-                    >
-                      <option value="" disabled>
-                        최근 이벤트
-                      </option>
-                      {eventCodeOptions.map((code) => (
-                        <option key={code} value={code}>
-                          {code}
-                        </option>
-                      ))}
-                    </select>
-                  ) : null}
-                  <Input
+                  <select
                     aria-label="이벤트 코드"
-                    value={eventCodeDraft}
+                    value={selectedAdminEventCode}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm font-medium"
+                    disabled={isRevealing || isLoadingEvents || adminEvents.length === 0}
                     onChange={(event) => setEventCodeDraft(event.target.value)}
-                    placeholder="event-code"
-                    className="h-10 text-sm"
-                    disabled={isRevealing}
-                  />
-                  <Button type="submit" className="h-10 w-full" disabled={isRevealing || !eventCodeDraft.trim()}>
+                  >
+                    <option value="" disabled>
+                      {isLoadingEvents ? "이벤트 불러오는 중" : "이벤트 선택"}
+                    </option>
+                    {adminEvents.map((item) => (
+                      <option key={item.id} value={item.eventCode}>
+                        {eventOptionLabel(item)}
+                      </option>
+                    ))}
+                  </select>
+                  {eventListError ? (
+                    <p className="text-sm font-medium text-destructive">{eventListError}</p>
+                  ) : !isLoadingEvents && adminEvents.length === 0 ? (
+                    <p className="text-sm font-medium text-muted-foreground">등록된 이벤트가 없습니다.</p>
+                  ) : null}
+                  <Button type="submit" className="h-10 w-full" disabled={isRevealing || !canApplyEventSelection}>
                     이벤트 적용
                   </Button>
                 </form>
-              </div>
-
-              <div>
-                <div className="mb-2 text-sm font-semibold text-foreground">패턴 선택</div>
-                <div className="grid grid-cols-3 gap-2 lg:grid-cols-1">
-                  {BOARD_PATTERN_OPTIONS.map((option) => (
-                    <Button
-                      key={option.id}
-                      type="button"
-                      variant={selectedPattern === option.id ? "default" : "outline"}
-                      className="h-12 justify-between gap-2 px-3 text-left"
-                      disabled={isRevealing}
-                      onClick={() => resetPickedState(option.id)}
-                    >
-                      <span className="font-bold">{option.label}</span>
-                      <span className="text-xs font-medium opacity-80">{option.description}</span>
-                    </Button>
-                  ))}
-                </div>
               </div>
 
               <div>
@@ -1071,37 +1115,14 @@ function decodeEventCode(value: string) {
   }
 }
 
-function readEventCodeOptions(currentEventCode = "") {
-  if (typeof window === "undefined") return currentEventCode ? [currentEventCode] : [];
-
-  const options = parseEventCodeOptions(localStorage.getItem(EVENT_CODE_OPTIONS_STORAGE_KEY));
-  if (!currentEventCode) return options;
-
-  return uniqueEventCodes([currentEventCode, ...options]);
-}
-
 function rememberEventCode(eventCode: string) {
-  const nextOptions = uniqueEventCodes([eventCode, ...readEventCodeOptions()]).slice(0, MAX_EVENT_CODE_OPTIONS);
+  if (typeof window === "undefined") return;
+
   localStorage.setItem(EVENT_CODE_STORAGE_KEY, eventCode);
-  localStorage.setItem(EVENT_CODE_OPTIONS_STORAGE_KEY, JSON.stringify(nextOptions));
-  return nextOptions;
 }
 
-function parseEventCodeOptions(value: string | null) {
-  if (!value) return [];
-
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return [];
-
-    return uniqueEventCodes(parsed.map((item) => String(item)));
-  } catch {
-    return [];
-  }
-}
-
-function uniqueEventCodes(values: string[]) {
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+function eventOptionLabel(event: ApiEvent) {
+  return [event.eventCode, event.label, event.eventDate, event.status].filter(Boolean).join(" · ");
 }
 
 function updateEventCodeInUrl(eventCode: string) {
@@ -1128,36 +1149,7 @@ function digitsOnly(value: string) {
 }
 
 function loadState(): PickerState {
-  const fallbackState = createDefaultState();
-  if (typeof window === "undefined") return fallbackState;
-
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) return fallbackState;
-
-  try {
-    const parsed = JSON.parse(saved) as PickerState;
-    const pattern = normalizeBoardPattern(parsed.pattern);
-    const prizes = normalizePrizes(parsed.prizes);
-    if (prizeTotalOf(prizes) !== BOARD_CELL_COUNT || parsed.cells?.length !== BOARD_CELL_COUNT) {
-      return fallbackState;
-    }
-
-    return {
-      eventTitle: parsed.eventTitle || fallbackState.eventTitle,
-      pattern,
-      prizes,
-      cells: parsed.cells,
-      results: Array.isArray(parsed.results) ? parsed.results : [],
-    };
-  } catch {
-    return fallbackState;
-  }
-}
-
-function normalizeBoardPattern(pattern: unknown): BoardPattern {
-  return pattern === "rising" || pattern === "spike" || pattern === "scatter"
-    ? pattern
-    : DEFAULT_BOARD_PATTERN;
+  return createDefaultState();
 }
 
 function normalizePrizes(prizes: Prize[]) {
@@ -1171,6 +1163,22 @@ function normalizePrizes(prizes: Prize[]) {
     .filter((prize) => prize.name && prize.count > 0);
 }
 
+function prizesFromInventory(prizes: ApiPrize[]) {
+  if (!Array.isArray(prizes)) return [];
+
+  return prizes
+    .map((prize, index) => {
+      const rank = Math.max(1, Number(prize.rank) || index + 1);
+
+      return {
+        rank: `${rank}등`,
+        name: String(prize.name || "경품").trim(),
+        count: safeCount(prize.initial),
+      };
+    })
+    .filter((prize) => prize.name && prize.count > 0);
+}
+
 function safeCount(value: number) {
   return Math.max(0, Number(value) || 0);
 }
@@ -1179,108 +1187,205 @@ function prizeTotalOf(prizes: Prize[]) {
   return prizes.reduce((sum, prize) => sum + safeCount(prize.count), 0);
 }
 
-function buildCells(prizes: Prize[], pattern: BoardPattern): PickerCell[] {
-  const normalizedPrizes = normalizePrizes(prizes);
-  const pool = normalizedPrizes.flatMap((prize, prizeIndex) =>
-    Array.from({ length: prize.count }, () => ({
-      prizeIndex,
-      rank: prize.rank,
-      name: prize.name,
-    })),
-  );
-  const tones = buildTonePattern(pattern);
+function remainingTotalOf(prizes: ApiPrize[]) {
+  return prizes.reduce((sum, prize) => sum + safeCount(prize.remaining), 0);
+}
 
-  return shuffle(pool).slice(0, BOARD_CELL_COUNT).map((prize, index) => ({
-    id: `cell-${index}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+function buildCells(prizes: Prize[]): PickerCell[] {
+  const normalizedPrizes = normalizePrizes(prizes);
+  const assignedPrizes: Array<{ prizeIndex: number; rank: string; name: string } | undefined> =
+    Array.from({ length: BOARD_CELL_COUNT });
+  const prizeOrder = deterministicIndexOrder("prize-layout");
+  let orderIndex = 0;
+
+  normalizedPrizes.forEach((prize, prizeIndex) => {
+    for (let count = 0; count < prize.count && orderIndex < BOARD_CELL_COUNT; count += 1) {
+      assignedPrizes[prizeOrder[orderIndex]] = {
+        prizeIndex,
+        rank: prize.rank,
+        name: prize.name,
+      };
+      orderIndex += 1;
+    }
+  });
+
+  const fallbackPrize = {
+    prizeIndex: 0,
+    rank: normalizedPrizes[0]?.rank ?? "1등",
+    name: normalizedPrizes[0]?.name ?? "경품",
+  };
+  const tones = buildTonePattern();
+
+  return assignedPrizes.map((prize, index) => ({
+    id: `cell-${index}`,
     picked: false,
+    empty: false,
     tone: tones[index],
-    ...prize,
+    ...(prize ?? fallbackPrize),
   }));
 }
 
-function buildTonePattern(pattern: BoardPattern): CellTone[] {
+function buildTonePattern(): CellTone[] {
+  const columnHeights = Array.from({ length: BOARD_COLUMNS }, (_, column) => {
+    const wave = Math.sin(column * 0.41) * 1.25 + Math.cos(column * 0.23) * 0.95;
+    const spike =
+      spikeWeight(column, 3) * 3.8 +
+      spikeWeight(column, 18) * 2.7 +
+      spikeWeight(column, 39) * 3.5 +
+      spikeWeight(column, 45) * 2.8;
+    const jitter = deterministicNumber(`height:${column}`) * 1.8;
+    return Math.max(3, Math.min(BOARD_ROWS, Math.round(4.4 + wave + spike + jitter)));
+  });
+
   return Array.from({ length: BOARD_CELL_COUNT }, (_, index) => {
     const column = index % BOARD_COLUMNS;
     const row = Math.floor(index / BOARD_COLUMNS);
     const rowFromBottom = BOARD_ROWS - 1 - row;
+    const height = columnHeights[column];
 
-    if (pattern === "rising") {
-      return risingTone(column, rowFromBottom);
+    if (rowFromBottom >= height) {
+      if (rowFromBottom === height && deterministicNumber(`edge:${index}`) < 0.14) {
+        return deterministicNumber(`edge-tone:${index}`) < 0.72 ? "blue" : "yellow";
+      }
+      if (rowFromBottom >= BOARD_ROWS - 2 && deterministicNumber(`outlier:${index}`) < 0.018) return "blue";
+      return "white";
     }
 
-    if (pattern === "spike") {
-      return spikeTone(column, rowFromBottom);
+    if (rowFromBottom > 1 && deterministicNumber(`inner-gap:${index}`) < 0.08) return "white";
+    if (rowFromBottom === 0) {
+      return deterministicNumber(`base:${index}`) < 0.78
+        ? "red"
+        : deterministicNumber(`base-alt:${index}`) < 0.62 ? "yellow" : "blue";
     }
-
-    return scatterTone(row, rowFromBottom);
+    if (rowFromBottom === 1 && deterministicNumber(`row-one:${index}`) < 0.16) return "red";
+    if (rowFromBottom <= 3) return deterministicNumber(`low:${index}`) < 0.5 ? "yellow" : "blue";
+    return deterministicNumber(`high:${index}`) < 0.78 ? "blue" : "yellow";
   });
 }
 
-function scatterTone(row: number, rowFromBottom: number): CellTone {
-  if (rowFromBottom === 0) {
-    return Math.random() < 0.9 ? "blue" : "yellow";
-  }
-
-  if (row === 0) {
-    return Math.random() < 0.7 ? (Math.random() < 0.64 ? "yellow" : "red") : "white";
-  }
-
-  const probability = rowFromBottom <= 2 ? 0.72 : rowFromBottom <= 5 ? 0.56 : 0.42;
-  if (Math.random() > probability) return "white";
-  return Math.random() < 0.58 ? "blue" : Math.random() < 0.86 ? "yellow" : "red";
+function spikeWeight(column: number, center: number) {
+  return Math.max(0, 1 - Math.abs(column - center) / 3);
 }
 
-function risingTone(column: number, rowFromBottom: number): CellTone {
-  if (rowFromBottom === 0) {
-    return Math.random() < 0.78 ? "blue" : Math.random() < 0.86 ? "red" : "yellow";
-  }
+function applyPickedAndStockLimit(
+  cells: PickerCell[],
+  eventCode: string,
+  pickedCellIndexes: number[],
+  remainingCount: number,
+) {
+  const pickedSet = new Set(normalizePickedCellIndexes(pickedCellIndexes));
+  const cellsWithPicked = cells.map((cell, index) => ({
+    ...cell,
+    picked: pickedSet.has(index),
+    empty: false,
+  }));
+  const unpickedCount = cellsWithPicked.reduce((sum, cell) => sum + (cell.picked ? 0 : 1), 0);
+  const boundedRemainingCount = Math.min(BOARD_CELL_COUNT, safeCount(remainingCount));
+  const emptyCount = Math.max(0, unpickedCount - boundedRemainingCount);
 
-  const ramp = clampPatternNumber((column - 16) / 17, 0, 1);
-  const shelf = column >= 32 ? (column < 42 ? 6 : 5) : 0;
-  const height = Math.max(2, Math.round(2 + ramp * 6), shelf);
-  const ridge = Math.abs(rowFromBottom - height) <= 1 && column >= 16;
-  const body = rowFromBottom < height && column >= 16 && Math.random() < 0.82;
-  const lowerFill = rowFromBottom <= Math.min(height, 4) && Math.random() < 0.76;
-  const outlier = Math.random() < 0.1;
+  if (emptyCount === 0) return cellsWithPicked;
 
-  if (!ridge && !body && !lowerFill && !outlier) return "white";
-  if (rowFromBottom <= 1 && Math.random() < 0.3) return "red";
-  if (ridge && column >= 33) return Math.random() < 0.68 ? "yellow" : "blue";
-  return Math.random() < 0.74 ? "blue" : "yellow";
+  const emptyIndexes = new Set(
+    deterministicIndexOrder(`empty:${eventCode || "default"}`)
+      .filter((index) => !pickedSet.has(index))
+      .slice(0, emptyCount),
+  );
+
+  return cellsWithPicked.map((cell, index) =>
+    emptyIndexes.has(index) ? { ...cell, empty: true, tone: "white" as CellTone } : cell,
+  );
 }
 
-function spikeTone(column: number, rowFromBottom: number): CellTone {
-  if (rowFromBottom === 0) {
-    return Math.random() < 0.86 ? "blue" : "yellow";
-  }
-
-  const center = 25.5;
-  const distance = Math.abs(column - center);
-  const spikeHeight = Math.max(0, Math.round(9.5 - distance * 0.7));
-  const shoulderHeight = Math.max(0, Math.round(5.8 - distance * 0.28));
-  const inSpike = spikeHeight > 0 && rowFromBottom <= spikeHeight;
-  const inShoulder = shoulderHeight > 0 && rowFromBottom <= shoulderHeight && Math.random() < 0.9;
-  const baseFill = rowFromBottom <= 3 && Math.random() < 0.58;
-  const outlier = Math.random() < (rowFromBottom <= 4 ? 0.15 : 0.08);
-
-  if (!inSpike && !inShoulder && !baseFill && !outlier) {
-    return "white";
-  }
-
-  if (distance <= 2.2 && rowFromBottom >= 2 && rowFromBottom <= 6) return "red";
-  if (distance <= 7 && rowFromBottom <= spikeHeight) return Math.random() < 0.82 ? "yellow" : "blue";
-  return Math.random() < 0.62 ? "blue" : "yellow";
+function readPickedCellIndexes(eventCode: string) {
+  if (!eventCode) return [];
+  return readPickedCellsByEvent()[eventCode] ?? [];
 }
 
-function clampPatternNumber(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
+function rememberPickedCellIndex(eventCode: string | undefined, index: number) {
+  if (!eventCode) return;
+
+  const current = readPickedCellsByEvent();
+  writePickedCellsByEvent({
+    ...current,
+    [eventCode]: normalizePickedCellIndexes([...(current[eventCode] ?? []), index]),
+  });
 }
 
-function shuffle<T>(items: T[]) {
-  const next = [...items];
-  for (let index = next.length - 1; index > 0; index -= 1) {
-    const randomIndex = Math.floor(Math.random() * (index + 1));
-    [next[index], next[randomIndex]] = [next[randomIndex], next[index]];
+function clearPickedCellIndexes(eventCode: string) {
+  if (!eventCode) return;
+
+  const current = readPickedCellsByEvent();
+  const next = { ...current };
+  delete next[eventCode];
+  writePickedCellsByEvent(next);
+}
+
+function readPickedCellsByEvent(): PickedCellsByEvent {
+  if (typeof window === "undefined") return {};
+
+  const saved = localStorage.getItem(PICKED_CELLS_STORAGE_KEY);
+  if (!saved) return {};
+
+  try {
+    const parsed = JSON.parse(saved) as unknown;
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
+      writePickedCellsByEvent({});
+      return {};
+    }
+
+    const record = parsed as Record<string, unknown>;
+    if ("cells" in record || "prizes" in record || "results" in record) {
+      writePickedCellsByEvent({});
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(record)
+        .map(([key, value]) => [key, normalizePickedCellIndexes(value)] as const)
+        .filter(([key, value]) => key.trim() && value.length > 0),
+    );
+  } catch {
+    writePickedCellsByEvent({});
+    return {};
   }
-  return next;
+}
+
+function writePickedCellsByEvent(store: PickedCellsByEvent) {
+  if (typeof window === "undefined") return;
+
+  const normalized = Object.fromEntries(
+    Object.entries(store)
+      .map(([key, value]) => [key, normalizePickedCellIndexes(value)] as const)
+      .filter(([key, value]) => key.trim() && value.length > 0),
+  );
+  localStorage.setItem(PICKED_CELLS_STORAGE_KEY, JSON.stringify(normalized));
+}
+
+function normalizePickedCellIndexes(value: unknown) {
+  if (!Array.isArray(value)) return [];
+
+  return Array.from(
+    new Set(
+      value
+        .map((item) => Number(item))
+        .filter((item) => Number.isInteger(item) && item >= 0 && item < BOARD_CELL_COUNT),
+    ),
+  ).sort((a, b) => a - b);
+}
+
+function deterministicIndexOrder(seed: string) {
+  return Array.from({ length: BOARD_CELL_COUNT }, (_, index) => index).sort((left, right) => {
+    const leftWeight = deterministicNumber(`${seed}:${left}`);
+    const rightWeight = deterministicNumber(`${seed}:${right}`);
+    return leftWeight === rightWeight ? left - right : leftWeight - rightWeight;
+  });
+}
+
+function deterministicNumber(seed: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 0x100000000;
 }

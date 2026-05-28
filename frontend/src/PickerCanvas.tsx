@@ -9,6 +9,7 @@ export type PickerCell = {
   prizeIndex: number;
   tone: CellTone;
   picked: boolean;
+  empty: boolean;
 };
 
 type PickerCanvasProps = {
@@ -109,11 +110,11 @@ export function PickerCanvas({
         rects[index] = { x, y, width: layout.cellWidth, height: layout.cellHeight };
         drawCell(context, cell, x, y, layout.cellWidth, layout.cellHeight, index === hoverIndex);
 
-        if (cell.picked) {
+        if (cell.picked && !cell.empty) {
           drawPickedState(context, cell, x, y, layout.cellWidth, layout.cellHeight);
         }
 
-        if (index === hoverIndex && !cell.picked) {
+        if (index === hoverIndex && !cell.picked && !cell.empty) {
           drawHoverState(context, x, y, layout.cellWidth, layout.cellHeight);
         }
       });
@@ -164,6 +165,7 @@ export function PickerCanvas({
   const selectedCellLabel = useMemo(() => {
     if (hoverIndex === null || hoverIndex < 0) return "500칸 뽑기 차트";
     const cell = cells[hoverIndex];
+    if (cell?.empty) return `${hoverIndex + 1}번 칸 빈 칸`;
     return cell?.picked ? `${hoverIndex + 1}번 칸 선택 완료` : `${hoverIndex + 1}번 칸 선택 가능`;
   }, [cells, hoverIndex]);
 
@@ -181,7 +183,7 @@ export function PickerCanvas({
       onClick={(event) => {
         if (isRevealing) return;
         const index = getIndexFromPointer(event);
-        if (index === null || index < 0 || cells[index]?.picked) return;
+        if (index === null || index < 0 || cells[index]?.picked || cells[index]?.empty) return;
         onPick(index);
       }}
     />
@@ -251,6 +253,7 @@ function drawCell(
   height: number,
   isHovered: boolean,
 ) {
+  if (cell.empty) return;
   if (cell.tone === "white" && !isHovered) return;
 
   context.save();

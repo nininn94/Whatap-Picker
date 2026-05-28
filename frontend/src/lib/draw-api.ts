@@ -6,6 +6,15 @@ export type ApiPrize = {
   remaining: number;
 };
 
+export type ApiEvent = {
+  id: string;
+  eventCode: string;
+  eventDate: string;
+  endDate: string | null;
+  label: string;
+  status: string;
+};
+
 export type LeadSearchItem = {
   leadId: string;
   name: string;
@@ -89,6 +98,10 @@ export async function fetchDrawHistory(params: { leadId: string; eventCode: stri
   return requestJson<DrawResponse>(
     `/api/draw/history?${new URLSearchParams(params)}`,
   );
+}
+
+export async function fetchAdminEvents() {
+  return requestJson<ApiEvent[]>("/api/admin/events");
 }
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "").replace(/\/+$/, "");

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const STORAGE_KEY = "whatap-picker-display-v9";
+const STORAGE_KEY = "whatap-picker-display-v8";
 
 async function mockPrizeInventory(page: Page) {
   await page.route("**/api/prizes?**", async (route) => {
@@ -13,6 +13,9 @@ async function mockPrizeInventory(page: Page) {
         prizes: [
           { rank: 1, name: "프리미엄 굿즈", initial: 10, awarded: 2, remaining: 8 },
           { rank: 2, name: "텀블러", initial: 40, awarded: 10, remaining: 30 },
+          { rank: 3, name: "스티커팩", initial: 90, awarded: 0, remaining: 90 },
+          { rank: 4, name: "쿠폰", initial: 160, awarded: 0, remaining: 160 },
+          { rank: 5, name: "참가 기념품", initial: 200, awarded: 0, remaining: 200 },
         ],
       }),
     });
@@ -76,16 +79,20 @@ test("runs a full mock draw cycle for the test participant", async ({ page }) =>
 
   await expect(page.getByText("이벤트 및 테스트 관리")).toBeVisible();
   await expect(page.getByText(/현재 선택된 이벤트: event-1/)).toBeVisible();
-  await page.getByRole("button", { name: /상승형/ }).click();
-  await expect
-    .poll(async () => page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY))
-    .toContain("\"pattern\":\"rising\"");
   await page.getByRole("button", { name: /3등.*Mock 스티커팩/ }).click();
 
   await expect(page.getByTestId("draw-result-rank")).toBeVisible({ timeout: 5_000 });
   await expect
-    .poll(async () => page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY))
-    .toContain("\"picked\":true");
+    .poll(async () =>
+      page.evaluate((key) => {
+        const stored = localStorage.getItem(key);
+        return stored ? (JSON.parse(stored)["event-1"]?.length ?? 0) : 0;
+      }, STORAGE_KEY),
+    )
+    .toBe(1);
+  await expect
+    .poll(async () => page.evaluate((key) => localStorage.getItem(key) || "", STORAGE_KEY))
+    .not.toContain("\"cells\"");
 });
 
 test("resets locally saved picked cells", async ({ page }) => {
@@ -93,23 +100,8 @@ test("resets locally saved picked cells", async ({ page }) => {
   await page.goto("/?eventCode=event-1");
   await page.evaluate(() => {
     localStorage.setItem(
-      "whatap-picker-display-v9",
-      JSON.stringify({
-        eventTitle: "Whatap 경품 뽑기",
-        pattern: "scatter",
-        prizes: [
-          { rank: "1등", name: "프리미엄 굿즈", count: 500 },
-        ],
-        cells: Array.from({ length: 500 }, (_, index) => ({
-          id: `cell-${index}`,
-          rank: "1등",
-          name: "프리미엄 굿즈",
-          prizeIndex: 0,
-          tone: "blue",
-          picked: index === 0,
-        })),
-        results: [{ id: "result-1", cellNumber: 1, rank: "1등", name: "프리미엄 굿즈", pickedAt: "now" }],
-      }),
+      "whatap-picker-display-v8",
+      JSON.stringify({ "event-1": [0] }),
     );
   });
   await page.reload();
@@ -118,6 +110,11 @@ test("resets locally saved picked cells", async ({ page }) => {
   await page.getByRole("button", { name: /초기화/ }).click();
 
   await expect
-    .poll(async () => page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY))
-    .not.toContain("\"picked\":true");
+    .poll(async () =>
+      page.evaluate((key) => {
+        const stored = localStorage.getItem(key);
+        return stored ? (JSON.parse(stored)["event-1"]?.length ?? 0) : 0;
+      }, STORAGE_KEY),
+    )
+    .toBe(0);
 });

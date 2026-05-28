@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   drawPrize,
+  fetchAdminEvents,
   fetchPrizeInventory,
   searchLeads,
 } from "./draw-api";
@@ -54,6 +55,30 @@ describe("draw-api", () => {
       body: JSON.stringify({ leadId: "lead-1", eventCode: "event-1" }),
       credentials: "include",
       headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  it("fetches admin events", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse([
+        {
+          id: "event-id-1",
+          eventCode: "event-1",
+          eventDate: "2026-05-28",
+          endDate: null,
+          label: "첫 번째 이벤트",
+          status: "OPEN",
+        },
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await fetchAdminEvents();
+
+    expect(response[0].eventCode).toBe("event-1");
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/events", {
+      credentials: "include",
+      headers: {},
     });
   });
 
