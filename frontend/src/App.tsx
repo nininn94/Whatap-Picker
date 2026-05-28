@@ -716,14 +716,6 @@ export default function App() {
             onSubmit={submitParticipant}
           >
             <div className="mb-6">
-              <div className="mb-3 flex flex-wrap gap-2">
-                <Badge className="px-3 py-1 text-sm">와탭 뽑기 이벤트</Badge>
-                {eventCode ? (
-                  <Badge variant="secondary" className="max-w-full px-3 py-1 text-sm">
-                    {eventCode}
-                  </Badge>
-                ) : null}
-              </div>
               <h1 className="text-2xl font-bold tracking-normal text-foreground">제출하신 설문 정보를 입력해 주세요.</h1>
               {prizeStatus ? (
                 <p className="mt-2 text-sm font-medium text-muted-foreground">{prizeStatus}</p>
