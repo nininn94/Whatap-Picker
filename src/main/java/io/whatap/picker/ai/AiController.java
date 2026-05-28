@@ -102,7 +102,13 @@ public class AiController {
         }
 
         List<LeadScore> targets = new java.util.ArrayList<>();
-        if (req != null && req.aiStatus() != null) {
+        if (req != null && Boolean.TRUE.equals(req.all())) {
+            // 전체 재분석 — MANUAL_OVERRIDE 만 보존, 그 외 모든 상태 큐잉
+            for (AiStatus s : AiStatus.values()) {
+                if (s == AiStatus.MANUAL_OVERRIDE) continue;
+                targets.addAll(repository.findByAiStatus(s));
+            }
+        } else if (req != null && req.aiStatus() != null) {
             targets.addAll(repository.findByAiStatus(req.aiStatus()));
         } else {
             targets.addAll(repository.findByAiStatus(AiStatus.PENDING));
@@ -115,5 +121,5 @@ public class AiController {
 
     public record ScoreRequest(@NotNull UUID leadId, Boolean force) {}
     public record OverrideRequest(Grade grade, Short score, NextAction nextAction, String reason) {}
-    public record RescoreRequest(String eventCode, AiStatus aiStatus) {}
+    public record RescoreRequest(String eventCode, AiStatus aiStatus, Boolean all) {}
 }

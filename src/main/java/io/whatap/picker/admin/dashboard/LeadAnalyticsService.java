@@ -50,15 +50,16 @@ public class LeadAnalyticsService {
         long denom = leads.size() + rejection;
         double validRatio = denom == 0 ? 1.0 : (double) leads.size() / denom;
 
-        return Map.of(
-                "eventCode", event != null ? event.getEventCode() : null,
-                "eventDate", event != null ? event.getEventDate() : null,
-                "leadCount", leads.size(),
-                "drawCount", drawCount,
-                "wantsConsultationCount", wantsConsult,
-                "emailRejectionCount", rejection,
-                "validEmailRatio", Math.round(validRatio * 1000) / 1000.0
-        );
+        // Map.of 는 null 값 허용 안 함 → LinkedHashMap 으로 (eventCode 미지정 시 null 가능)
+        java.util.LinkedHashMap<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("eventCode", event != null ? event.getEventCode() : null);
+        out.put("eventDate", event != null ? event.getEventDate() : null);
+        out.put("leadCount", leads.size());
+        out.put("drawCount", drawCount);
+        out.put("wantsConsultationCount", wantsConsult);
+        out.put("emailRejectionCount", rejection);
+        out.put("validEmailRatio", Math.round(validRatio * 1000) / 1000.0);
+        return out;
     }
 
     @Transactional(readOnly = true)

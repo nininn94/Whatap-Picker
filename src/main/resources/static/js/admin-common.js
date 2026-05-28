@@ -56,6 +56,70 @@ const adminApi = (() => {
     };
 })();
 
+/**
+ * 경량 Markdown → HTML 렌더러.
+ * 지원: # ## ### 헤딩, **bold**, *italic*, `inline code`, - / * 리스트, 1. 2. 번호리스트,
+ *      줄바꿈, 단락. HTML escape 후 변환하므로 XSS 안전.
+ * 외부 라이브러리 의존 없이 어드민 페이지에 충분.
+ */
+function renderMarkdown(text) {
+    if (text == null) return '';
+    // 1) HTML escape
+    let s = String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    // 2) 코드 펜스 ```...``` (간단)
+    s = s.replace(/```([\s\S]*?)```/g, (_, code) => `<pre class="md-pre">${code.trim()}</pre>`);
+
+    // 3) inline code `xxx`
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // 4) 헤딩 ###, ##, #
+    s = s.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+    s = s.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+    s = s.replace(/^#\s+(.+)$/gm,  '<h1>$1</h1>');
+
+    // 5) bold **xx**, italic *xx*
+    s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+
+    // 6) 리스트 (- item / * item / 1. item) 묶기
+    const lines = s.split(/\n/);
+    const out = [];
+    let inUl = false, inOl = false;
+    for (const line of lines) {
+        const ulMatch = line.match(/^\s*[-*]\s+(.+)$/);
+        const olMatch = line.match(/^\s*\d+\.\s+(.+)$/);
+        if (ulMatch) {
+            if (inOl) { out.push('</ol>'); inOl = false; }
+            if (!inUl) { out.push('<ul>'); inUl = true; }
+            out.push(`<li>${ulMatch[1]}</li>`);
+        } else if (olMatch) {
+            if (inUl) { out.push('</ul>'); inUl = false; }
+            if (!inOl) { out.push('<ol>'); inOl = true; }
+            out.push(`<li>${olMatch[1]}</li>`);
+        } else {
+            if (inUl) { out.push('</ul>'); inUl = false; }
+            if (inOl) { out.push('</ol>'); inOl = false; }
+            out.push(line);
+        }
+    }
+    if (inUl) out.push('</ul>');
+    if (inOl) out.push('</ol>');
+    s = out.join('\n');
+
+    // 7) 단락: 빈 줄로 구분된 블록을 <p> 로 (헤딩/리스트/pre 는 건너뜀)
+    const blocks = s.split(/\n{2,}/).map(b => {
+        const t = b.trim();
+        if (!t) return '';
+        if (/^<(h\d|ul|ol|pre)/.test(t)) return t;
+        return `<p>${t.replace(/\n/g, '<br>')}</p>`;
+    });
+    return blocks.join('\n');
+}
+
 function toast(msg, isError = false) {
     let el = document.getElementById('toast');
     if (!el) {

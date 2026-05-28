@@ -374,6 +374,33 @@ pre.code-block {
     border: 1px solid var(--border);
 }
 
+/* ──────────────────  마크다운 렌더링 (AI 인사이트)  ────────────────── */
+.markdown-body {
+    background: var(--surface-2);
+    padding: 18px 22px;
+    border-radius: var(--radius);
+    font-size: 0.92rem;
+}
+.markdown-body h1 { font-size: 1.15rem; margin: 16px 0 8px; }
+.markdown-body h2 { font-size: 1.02rem; margin: 14px 0 6px; color: var(--brand); }
+.markdown-body h3 { font-size: 0.95rem; margin: 12px 0 4px; color: var(--text-muted); }
+.markdown-body h1:first-child,
+.markdown-body h2:first-child,
+.markdown-body h3:first-child { margin-top: 0; }
+.markdown-body p  { margin: 8px 0; line-height: 1.7; }
+.markdown-body ul, .markdown-body ol { margin: 6px 0 12px 22px; padding: 0; }
+.markdown-body li { margin: 3px 0; line-height: 1.6; }
+.markdown-body strong { color: var(--text); }
+.markdown-body code {
+    background: #e5e7eb; padding: 1px 6px; border-radius: 4px;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 0.88em;
+}
+.markdown-body .md-pre {
+    background: #0f172a; color: #e2e8f0;
+    padding: 12px; border-radius: var(--radius-sm);
+    overflow: auto; font-size: 0.82rem; margin: 8px 0;
+}
+
 /* ──────────────────  대시보드 가시성 강화  ────────────────── */
 
 .dashboard-anchors {

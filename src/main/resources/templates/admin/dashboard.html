@@ -174,8 +174,8 @@
                 (어드민 <a th:href="@{/admin/settings}">설정</a>에서 키 등록).
                 선택된 행사의 통계를 LLM 이 분석합니다.
             </p>
-            <div id="insight-content" class="code-block" style="white-space:pre-wrap; line-height:1.6; font-family:inherit; min-height:80px;">
-                (아직 생성되지 않음)
+            <div id="insight-content" class="markdown-body" style="line-height:1.7; min-height:80px;">
+                <span class="muted">(아직 생성되지 않음)</span>
             </div>
         </div>
     </section>
@@ -463,16 +463,16 @@
         const content = document.getElementById('insight-content');
         const meta = document.getElementById('insight-meta');
         btn.disabled = true; btn.textContent = '생성 중...';
-        content.textContent = '...';
+        content.innerHTML = '<span class="muted">생성 중...</span>';
         document.getElementById('sec-insight').scrollIntoView({ behavior:'smooth', block:'start' });
         try {
             const r = await adminApi.post('/api/admin/dashboard/insights' + param());
-            content.textContent = r.insight || '(빈 응답)';
+            content.innerHTML = renderMarkdown(r.insight || '(빈 응답)');
             meta.textContent = `backend: ${r.backend} · model: ${r.model} · ${new Date(r.generatedAt).toLocaleString()}`;
             toast('인사이트 생성 완료');
         } catch (e) {
             content.textContent = '생성 실패: ' + e.message
-                + '\n\nAnthropic 키가 설정되어 있는지 /admin/settings 에서 확인하세요.';
+                + '  Anthropic 키가 설정되어 있는지 /admin/settings 에서 확인하세요.';
             toast(e.message, true);
         } finally {
             btn.disabled = false; btn.textContent = '인사이트 생성';
