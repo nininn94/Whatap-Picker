@@ -75,8 +75,9 @@ public class SurveyPageController {
         return "survey/closed";
     }
 
+    /** 루트 진입 시 어드민 홈으로. 미인증이면 SecurityConfig 가 /admin/login 으로 보냄. */
     @GetMapping("/")
     public RedirectView root() {
-        return new RedirectView("/", false);
+        return new RedirectView("/admin", false);
     }
 }
