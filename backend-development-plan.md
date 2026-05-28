@@ -13,6 +13,10 @@
 > - 차단 이메일 도메인: gmail.com, naver.com, empas.com, nate.com, daum.net, hanmail.net, hotmail.com, yahoo.co.kr, icloud.com, outlook.com, kakao.com
 > - 어드민 대시보드: 풀 대시보드 (요약·타임라인·세그먼트·모니터링·도입의사·경품·와탭 NPS 7개 API)
 > - 설문 폼: 실제 와탭 설문 8페이지 분기 폼 그대로 반영 (스크린샷 기반)
+> - **SSR**: Thymeleaf로 QR/설문/Thank-you/어드민 폼 빌더 페이지 직접 렌더링 (뽑기·검색은 별도 SPA가 `/api/**` 호출)
+> - **QR**: ZXing으로 PNG 생성, 부스 풀스크린 페이지(`/event/{code}/qr`) 제공
+> - **폼 관리**: `FormTemplate` JSONB 스키마로 정의, 어드민이 행사별로 기본 템플릿을 복사·커스텀
+> - **CSV 다운로드**: 리드 + 대시보드 집계 6종 CSV export (UTF-8 BOM, RFC 4180, 한국어 라벨)
 
 ---
 
@@ -21,17 +25,21 @@
 ### MVP 범위 (필수 구현)
 
 - 와탭 8페이지 분기 설문 데이터 수집 및 직무 기반 이메일 검증
-- 운영자 로그인 + 운영자 페이지 (검색/추첨)
-- 어드민 로그인 + 어드민 페이지 (행사·경품·운영자 계정·리드 관리)
-- 일자별 중복 참여 방지 + 일자별 재고 관리 기반 추첨 실행 (꽝 포함)
-- 추첨 결과 영속화 + 재고 차감 원자적 처리
-- Ollama 로컬 LLM으로 리드 등급 분류
-- **풀 어드민 대시보드** 7개 API (요약·타임라인·세그먼트·모니터링·도입의사·경품·와탭 NPS)
-- 2년 보존 정책 + 어드민 만료 파기 API
+- **Thymeleaf SSR 페이지**: 설문 폼 / Thank-you / 마감 / QR 풀스크린 / 어드민 폼 빌더
+- **행사별 QR 생성** (ZXing PNG + 부스 풀스크린 표시 페이지)
+- **폼 빌더**: `FormTemplate` JSONB 스키마, 행사마다 기본 템플릿 복사 후 커스텀 가능
+- 운영자 로그인 + 검색/추첨 (별도 SPA가 API 호출)
+- 어드민 로그인 + 행사·경품·운영자·리드·폼 관리
+- 일자별 중복 방지 + 유한 재고 추첨 (꽝 포함)
+- Ollama 로컬 LLM 리드 등급 분류
+- 풀 어드민 대시보드 7개 API
+- **리드/대시보드 CSV 다운로드** (UTF-8 BOM, 한국어 라벨, 스트리밍)
+- 2년 보존 + 만료 파기 API
 
 ### 확장 후보 (시간 여유 시)
+- 폼 빌더 시각화 UI (현재 MVP는 JSON 직편집)
 - AI 후속 메시지 초안 생성 — `POST /api/ai/follow-up-message`
-- 리드 CSV/XLSX export
+- XLSX export (현재 MVP는 CSV)
 - 자동 파기 배치 (`@Scheduled`)
 - 동의 철회 셀프 API
 
@@ -53,6 +61,9 @@
 | 인증 | **Spring Security 6 + JWT** | 운영자/어드민 로그인 |
 | 비밀번호 해시 | BCrypt | Spring Security `PasswordEncoder` |
 | 검증 | Jakarta Bean Validation | `@NotBlank`, `@Pattern`, custom validator |
+| **SSR 템플릿** | **Thymeleaf** | QR 표시·설문 폼·Thank you 페이지·어드민 폼 빌더 |
+| **클라이언트 보조** | HTMX + Alpine.js (CDN) | 분기 표시/숨김, 폼 단계 이동 — SPA 없이 가벼운 인터랙션 |
+| **QR 생성** | `com.google.zxing:core` + `zxing:javase` | PNG/SVG 출력 |
 | AI 연동 | **Ollama (Docker)** | `http://ollama:11434/api/chat`, 모델 **`llama3.2:3b`** (가벼움 우선) |
 | 직렬화 | Jackson | LocalDate/LocalDateTime ISO-8601 |
 | 테스트 | JUnit 5 + Spring Boot Test + Testcontainers | Postgres 컨테이너로 통합 테스트 |
@@ -116,12 +127,28 @@ Lead (설문 제출자)
 ├── updated_at
 └── (1:N) DrawHistory, (1:1) LeadScore
 
-Event (행사 일자)
+Event (행사)
 ├── id (PK)
-├── event_date (UNIQUE)
-├── label
+├── event_code (UNIQUE, 짧은 슬러그 - URL용 예: "devops-day-2026")
+├── event_date (행사 일자, 다일 행사면 시작일)
+├── end_date (다일 행사 종료일, nullable)
+├── label (예: "DEVOPS DAY 2026")
+├── form_template_id (FK FormTemplate, 이 행사에 사용할 폼)
+├── qr_image_path (서버 캐시된 QR PNG 경로, nullable)
 ├── created_by (FK AppUser)
-└── created_at
+├── created_at
+└── archived (boolean, 종료된 행사 표시)
+
+FormTemplate (설문 폼 정의)
+├── id (PK)
+├── name (예: "와탭 기본 설문 v1", "DEVOPS DAY 커스텀")
+├── is_system_default (boolean - 와탭 기본 템플릿은 1개, 잠금)
+├── schema (JSONB - 페이지/필드/분기/검증 정의, 아래 3.5 참고)
+├── version (낙관적 잠금용)
+├── created_by (FK AppUser)
+├── cloned_from_id (FK self, nullable - 어떤 템플릿을 복사했는지)
+├── created_at
+└── updated_at
 
 Prize (행사일자 × 등수 재고)
 ├── id (PK)
@@ -278,9 +305,98 @@ else                                    → 회사 메일 강제 (차단 도메�
 - `Lead(full_name, phone_last4)` 운영자 검색 가속
 - `Lead(industry)`, `Lead(monitoring_status)`, `Lead(plan_within_year)` 대시보드 집계용
 - `Lead(retention_until)` 보존 만료 배치용
-- `Lead(survey_payload jsonb_path_ops)` GIN — 모니터링 제품별 집계 (확장)
+- `Lead(survey_payload jsonb_path_ops)` GIN — 모니터링 제품별 집계
 - `DrawHistory(lead_id, event_id)` UNIQUE
 - `Prize(event_id, rank)` UNIQUE
+- `Event(event_code)` UNIQUE
+- `FormTemplate(is_system_default)` partial UNIQUE WHERE is_system_default = true
+
+### 3.5 FormTemplate `schema` JSONB 구조
+
+폼 빌더로 편집 가능한 폼 정의. 와탭 기본 템플릿은 §3.1 / §4.1 구조를 그대로 JSON으로 옮겨 시드.
+
+```jsonc
+{
+  "version": 1,
+  "title": "WhaTap 설문 이벤트",
+  "subtitle": "본 설문은 데이터의 신뢰성을 위해 ...",
+  "pages": [
+    {
+      "id": "common-1",
+      "title": "기본 정보",
+      "fields": [
+        { "key": "firstName",  "type": "TEXT",  "label": "성",    "required": true },
+        { "key": "lastName",   "type": "TEXT",  "label": "이름",  "required": true },
+        { "key": "company",    "type": "TEXT",  "label": "회사명", "required": true },
+        {
+          "key": "email", "type": "EMAIL", "label": "회사 이메일", "required": true,
+          "helper": "경품은 기입하신 비즈니스 이메일을 통해 본인 확인 후 발송됩니다. (gmail, naver, kakao 등 개인 이메일 기재 시 당첨 제외)",
+          "validation": "COMPANY_EMAIL_IF_NOT_STUDENT_FREELANCER"
+        },
+        { "key": "phone",      "type": "PHONE", "label": "핸드폰 번호", "required": true,
+          "pattern": "^010\\d{8}$" },
+        { "key": "industry",      "type": "SELECT",       "label": "산업군",   "required": true, "optionsRef": "INDUSTRY" },
+        { "key": "jobFunction",   "type": "SELECT",       "label": "직무",     "required": true, "optionsRef": "JOB_FUNCTION" },
+        { "key": "jobLevel",      "type": "SELECT",       "label": "직급",     "required": true, "optionsRef": "JOB_LEVEL" },
+        { "key": "companySize",   "type": "SELECT",       "label": "기업 규모", "required": true, "optionsRef": "COMPANY_SIZE" },
+        { "key": "employeeCountRange", "type": "SELECT",  "label": "직원 수",   "required": true, "optionsRef": "EMPLOYEE_COUNT_RANGE" },
+        { "key": "monitoringStatus", "type": "RADIO",     "label": "현재 모니터링을 사용하고 계신가요?", "required": true, "optionsRef": "MONITORING_STATUS" }
+      ],
+      "branching": [
+        { "when": { "monitoringStatus": "USING_WHATAP" }, "goTo": "whatap" },
+        { "when": { "monitoringStatus": "USING_OTHER"  }, "goTo": "other" },
+        { "when": { "monitoringStatus": "NOT_USING"   },  "goTo": "not-using" }
+      ]
+    },
+    {
+      "id": "other",
+      "title": "사용 중인 모니터링",
+      "fields": [
+        { "key": "surveyPayload.other.commercialProducts", "type": "CHECKBOX_MULTI",
+          "label": "어떤 모니터링을 사용하고 계신가요? (복수선택 가능)", "required": true,
+          "optionsRef": "COMMERCIAL_PRODUCT" },
+        { "key": "surveyPayload.other.commercialOther", "type": "LONG_ANSWER",
+          "label": "사용하고 계신 상용 모니터링 제품을 작성해 주세요.",
+          "showWhen": { "surveyPayload.other.commercialProducts": { "contains": "OTHER" } } },
+        { "key": "surveyPayload.other.openSourceProducts", "type": "CHECKBOX_MULTI",
+          "label": "어떤 오픈소스 모니터링을 사용하고 계신가요? (복수선택 가능)",
+          "showWhen": { "surveyPayload.other.commercialProducts": { "contains": "OPEN_SOURCE" } },
+          "optionsRef": "OPEN_SOURCE_PRODUCT" }
+        /* ... 동일 패턴으로 페이지 #3, #5 분기까지 정의 */
+      ]
+    }
+    /* "whatap", "not-using", "common-7" 페이지도 같은 구조 */
+  ],
+  "options": {
+    "INDUSTRY":      [{ "value": "FINANCE_INSURANCE", "label": "금융 및 보험 서비스" }, ...],
+    "JOB_FUNCTION":  [{ "value": "DEVOPS",            "label": "DevOps" }, ...],
+    /* enum 카탈로그를 schema 안에 임베드 — 어드민이 라벨만 바꿀 수 있도록 */
+  },
+  "consents": [
+    { "key": "privacyConsent",   "label": "개인정보 수집·이용 동의", "required": true, "body": "..." },
+    { "key": "marketingConsent", "label": "마케팅 활용 동의",       "required": true, "body": "..." }
+  ],
+  "thankYou": {
+    "headline": "설문에 참여해 주셔서 감사합니다.",
+    "subhead": "완료하신 분께서는 이 화면을 직원에게 보여 주세요!",
+    "body": "..."
+  }
+}
+```
+
+**필드 타입**: `TEXT`, `EMAIL`, `PHONE`, `LONG_ANSWER`, `SELECT`, `RADIO`, `CHECKBOX_MULTI`, `SCALE_1_10`, `CONSENT`
+
+**커스터마이즈 범위**
+- 페이지 추가/삭제/순서 변경
+- 필드 추가/삭제/순서/required 변경, 라벨 변경
+- 분기 조건(`branching`/`showWhen`) 편집
+- 옵션 카탈로그(`options`) 라벨 변경 (단, value는 enum 고정 — 분석 일관성 유지)
+- 동의 문구 본문 편집
+- Thank you 메시지 편집
+
+**불변 (잠금)**
+- enum value 추가/제거 (예: 새 산업군 추가는 코드 변경 필요)
+- 시스템 핵심 키(`firstName`, `phone`, `email`, `monitoringStatus`, `privacyConsent`, `marketingConsent`) 제거
 
 **역할별 권한 매트릭스**
 
@@ -530,8 +646,69 @@ else                                    → 회사 메일 강제 (차단 도메�
 ### 리드 조회
 - `GET /api/admin/leads?eventDate=&grade=&industry=&jobLevel=&monitoringStatus=&planWithinYear=&page=&size=` — 페이징 + 다중 필터
 - `GET /api/admin/leads/{id}` — 상세 (설문 + 추첨 + AI 등급 묶음, `survey_payload` 포함)
-- `GET /api/admin/leads/export?eventDate=&format=csv|xlsx` — 내보내기
 - `DELETE /api/admin/leads/expired` — 보존 기간(2년) 만료 리드 일괄 파기
+
+### 리드 CSV 다운로드 — `GET /api/admin/leads/export.csv`
+
+쿼리 파라미터(목록 조회와 동일): `eventDate`, `grade`, `industry`, `jobLevel`, `monitoringStatus`, `planWithinYear`, `from`, `to`, `consultationPreference`
+
+**응답 헤더**
+```
+Content-Type: text/csv; charset=UTF-8
+Content-Disposition: attachment; filename="leads_2026-05-28_175430.csv"
+```
+
+**포맷 (RFC 4180 + Excel 호환)**
+- 인코딩: **UTF-8 + BOM** (`EF BB BF`) — Excel 한글 깨짐 방지
+- 구분자: `,`
+- 줄바꿈: `\r\n`
+- 따옴표 escape: `"` → `""`, 콤마/줄바꿈 포함 시 전체 필드를 `"..."`로 감쌈
+- 첫 줄 헤더, 한국어 라벨
+
+**컬럼 (47개)**
+```
+이벤트 코드, 이벤트 일자,
+리드 ID, 성, 이름, 회사명, 회사 이메일, 휴대폰,
+산업군, 직무, 직급, 기업 규모, 직원 수,
+현재 모니터링 상태,
+사용 상용 모니터링 (콤마 구분), 사용 오픈소스 모니터링 (콤마 구분),
+상용 운영방식, 상용 만족도, 상용 불만 (콤마 구분), 상용 연간예산, 상용 비용체감, 상용 교체이유,
+오픈소스 운영방식 (콤마 구분), 오픈소스 만족도, 오픈소스 어려운점 (콤마 구분),
+미사용자 운영고민 (콤마 구분), 미사용자 빈도문제 (콤마 구분),
+와탭 활용도, 와탭 필요도움 (콤마 구분),
+망설이는 이유, 관심 제품 (콤마 구분), 1년내 계획, 미팅 희망,
+개인정보 동의 시각, 마케팅 동의 시각, 보존 만료일,
+AI 등급, AI 사유, AI 후속액션,
+추첨 등수, 경품명, 추첨 시각, 추첨 운영자,
+제출 시각
+```
+
+- enum 값은 **한국어 라벨로 변환** (예: `IT_SERVICES` → `정보기술(IT) 및 서비스`)
+- `survey_payload` 깊은 구조는 위에 평탄화된 컬럼으로 펼침
+- 비어있는 값은 빈 문자열 (`null` 직접 출력 금지)
+- 동의·추첨 시각은 ISO-8601 (`2026-05-28T10:05:12+09:00`)
+
+**스트리밍 구현**
+- 대량 데이터 대비 `ResponseBodyEmitter` 또는 `StreamingResponseBody`로 청크 단위 전송
+- 메모리에 전체 row 안 올림
+- `Cursor` 기반 페치 (`@QueryHints` `FETCH_SIZE`)
+
+**감사 로그**
+- `AuditLog`에 `username`, `endpoint`, `filter`, `rowCount`, `ipAddress` 기록 (개인정보 export는 추적)
+
+### 대시보드 CSV 다운로드 (ADMIN)
+
+집계 결과도 CSV로 받을 수 있도록 — 마케터가 엑셀에서 가공할 때 편함.
+
+| 엔드포인트 | 내용 |
+| --- | --- |
+| `GET /api/admin/dashboard/export/summary.csv?eventDate=` | 요약 카드 한 줄 |
+| `GET /api/admin/dashboard/export/timeline.csv?from=&to=` | 일자별 시계열 |
+| `GET /api/admin/dashboard/export/segments.csv?eventDate=` | 산업/직무/직급/기업규모/모니터링 분포 long format |
+| `GET /api/admin/dashboard/export/monitoring.csv?eventDate=` | 모니터링 제품·만족도·교체이유 |
+| `GET /api/admin/dashboard/export/intent.csv?eventDate=` | 관심 제품·1년 내 계획·미팅 희망 |
+
+모두 동일한 헤더 규약 (UTF-8 BOM, RFC 4180, 한국어 라벨, 첫 줄 헤더).
 
 ### 4.B 풀 대시보드 API (ADMIN)
 
@@ -648,6 +825,122 @@ else                                    → 회사 메일 강제 (차단 도메�
 ### 초기 어드민 계정
 - 앱 기동 시 `bootstrap.admin.username` / `bootstrap.admin.password` 환경변수로 시드 (`AppUser`에 없으면 자동 생성)
 - 두 환경변수 중 하나라도 없으면 앱 시작 거부 (운영 사고 방지)
+
+---
+
+## 4.C 서버사이드 페이지 (Thymeleaf SSR)
+
+> 부스 모바일 진입을 빠르게 하기 위해 SSR. 운영자/어드민 페이지 중 뽑기 실행 같은 동적 인터랙션이 강한 것은 **별도 React/Vue SPA가 `/api/**`를 호출**하는 구조 (이 plan의 백엔드 책임은 SSR 페이지 + API 둘 다 제공).
+
+### 4.C.1 행사 진입 QR — `GET /event/{eventCode}/qr.png` (공개)
+
+ZXing으로 PNG 생성. 첫 호출 시 `event.qr_image_path`에 캐시.
+
+- 인코딩 대상: `https://<host>/survey/{eventCode}`
+- 크기: 1024×1024, 여백 4 모듈
+- 캐시: 24h `Cache-Control`
+
+### 4.C.2 부스 표시용 풀스크린 QR — `GET /event/{eventCode}/qr` (공개)
+
+부스 모니터/태블릿에 띄울 풀스크린 페이지.
+
+- 행사 라벨, 큰 QR 이미지, 짧은 안내 문구
+- `<meta http-equiv="refresh">` 또는 JS로 1시간마다 새로고침 (재고/상태 동기화)
+- 어드민 메뉴에서 미리보기 가능
+
+### 4.C.3 설문 폼 — `GET /survey/{eventCode}` (공개)
+
+- 해당 행사의 `FormTemplate.schema`를 읽어 Thymeleaf로 동적 렌더링
+- HTMX/Alpine.js로 페이지 간 이동 + 분기 표시/숨김
+- Submit은 `POST /api/leads` (eventCode 함께 전송 → 서버에서 `event_id` 매핑)
+- 행사가 `archived=true`면 마감 안내 페이지
+
+### 4.C.4 제출 완료 — `GET /survey/{eventCode}/complete` (공개)
+
+- `FormTemplate.schema.thankYou` 렌더링
+- "이 화면을 직원에게 보여 주세요" 안내
+- 직전 제출의 `leadId`를 쿼리/쿠키로 잠깐 유지 (운영자 검색 도움용)
+
+### 4.C.5 마감 안내 — `GET /survey/{eventCode}/closed` (공개)
+
+행사 종료/재고 소진 시.
+
+### 4.C.6 어드민 폼 빌더 — `GET /admin/forms` 외 (ADMIN)
+
+- `GET  /admin/forms` — 폼 템플릿 목록 페이지
+- `GET  /admin/forms/{id}` — 폼 미리보기 + 편집 진입
+- `GET  /admin/forms/{id}/edit` — JSON 직편집 + 시각화 빌더 (MVP는 JSON 편집기 우선)
+- `POST /admin/forms/{id}/preview` — 임시 저장 없이 렌더 미리보기
+
+→ 모두 Thymeleaf 페이지. 실제 저장/조회는 §4.D API로 분리.
+
+---
+
+## 4.D 폼 빌더 API (ADMIN)
+
+### 4.D.1 폼 템플릿 목록 — `GET /api/admin/forms`
+
+```json
+{
+  "templates": [
+    { "id": "uuid", "name": "와탭 기본 설문 v1", "isSystemDefault": true, "usedByEvents": 3 },
+    { "id": "uuid", "name": "DEVOPS DAY 커스텀", "isSystemDefault": false, "usedByEvents": 1 }
+  ]
+}
+```
+
+### 4.D.2 기본 템플릿 복사 — `POST /api/admin/forms/clone`
+
+```json
+{ "sourceId": "uuid", "name": "DEVOPS DAY 커스텀" }
+```
+
+→ `is_system_default=false`로 새 템플릿 생성. `cloned_from_id`에 출처 기록.
+
+### 4.D.3 폼 조회 — `GET /api/admin/forms/{id}`
+
+`schema` JSON 전체 반환.
+
+### 4.D.4 폼 저장 — `PUT /api/admin/forms/{id}`
+
+```json
+{ "name": "...", "schema": { ... }, "version": 3 }
+```
+
+- 시스템 기본(`is_system_default=true`)은 **수정 불가** (`409 LOCKED_TEMPLATE`)
+- 낙관적 잠금: `version` 불일치 시 `409 CONFLICT`
+- `schema` 검증: 시스템 핵심 키 누락 시 `400 SCHEMA_INVALID`
+
+### 4.D.5 폼 삭제 — `DELETE /api/admin/forms/{id}`
+
+- 시스템 기본은 삭제 불가
+- 사용 중인 행사가 있으면 `409 IN_USE` (먼저 행사에서 분리)
+
+### 4.D.6 행사에 폼 연결 — `PUT /api/admin/events/{eventId}/form`
+
+```json
+{ "formTemplateId": "uuid" }
+```
+
+행사 생성 시 자동으로 시스템 기본 템플릿이 연결되며, 어드민이 위 API로 커스텀 폼으로 교체 가능.
+
+### 4.D.7 행사 코드/QR 재생성 — `POST /api/admin/events/{eventId}/regenerate-qr`
+
+URL 변경 시 (예: `event_code` 변경) QR 캐시 무효화 + 재생성.
+
+---
+
+## 4.E 행사 생성 흐름 (어드민 시나리오)
+
+1. `POST /api/admin/events` — 행사 생성 (eventCode, label, date)
+   → 자동으로 시스템 기본 `FormTemplate` 연결
+   → QR 이미지 lazy 생성 (`/event/{eventCode}/qr.png` 첫 호출 시)
+2. `POST /api/admin/forms/clone` — 기본 템플릿 복사 (선택)
+3. `PUT /api/admin/forms/{newId}` — 라벨/문구/분기 커스텀
+4. `PUT /api/admin/events/{eventId}/form` — 행사에 커스텀 폼 연결
+5. `POST /api/admin/events/{eventId}/prizes` — 등수별 경품 등록
+6. 부스에서 `/event/{eventCode}/qr` 풀스크린 페이지 띄움
+7. 방문자가 QR 스캔 → `/survey/{eventCode}` 진입 → 설문 제출 → `/survey/{eventCode}/complete`
 
 ---
 
@@ -812,66 +1105,109 @@ src/main/java/io/whatap/picker/
 │   ├── AdminPrizeController.java
 │   ├── AdminUserController.java
 │   ├── AdminLeadController.java
+│   ├── AdminFormController.java          # 폼 빌더 API
 │   └── dashboard/
 │       ├── DashboardController.java
 │       └── LeadAnalyticsService.java
+├── form/
+│   ├── FormTemplate.java
+│   ├── FormTemplateRepository.java
+│   ├── FormTemplateService.java
+│   ├── schema/                            # SchemaNode, FieldDef, PageDef, BranchingRule
+│   └── validation/SchemaValidator.java
+├── page/                                  # SSR 페이지 컨트롤러
+│   ├── SurveyPageController.java          # /survey/{eventCode}, /complete, /closed
+│   ├── QrPageController.java              # /event/{eventCode}/qr, qr.png
+│   └── AdminFormBuilderPageController.java # /admin/forms, /edit, /preview
+├── qr/
+│   └── QrCodeService.java                 # ZXing 래퍼
+├── csv/
+│   ├── CsvExporter.java                   # UTF-8 BOM, RFC 4180, 한국어 라벨
+│   ├── LeadCsvWriter.java
+│   └── DashboardCsvWriter.java
 └── common/
     ├── ApiException.java
     └── GlobalExceptionHandler.java
+```
+
+**Thymeleaf 템플릿 위치**
+
+```
+src/main/resources/templates/
+├── survey/
+│   ├── form.html              # 동적 schema 렌더링
+│   ├── complete.html
+│   └── closed.html
+├── event/
+│   └── qr-display.html        # 부스 풀스크린 QR 페이지
+├── admin/
+│   ├── layout.html
+│   ├── forms/
+│   │   ├── list.html
+│   │   ├── edit.html          # JSON editor + 미리보기
+│   │   └── preview.html
+└── fragments/
+    ├── field/                 # 필드 타입별 partial (text, select, radio, ...)
+    └── consent.html
 ```
 
 ---
 
 ## 7. 개발 단계 (해커톤 타임라인)
 
-> 폼 복잡도 + 풀 대시보드 + 어드민 + Ollama로 **약 13~16h** 추정. 2일 분량.
+> SSR 페이지 + 폼 빌더 추가로 **약 18~22h** 추정. 2~2.5일 분량. 핵심 경로(QR→설문→검색→추첨→대시보드)에 시간을 몰아주고 폼 빌더는 JSON 직편집부터 시작.
 
 ### Phase 0 — 인프라 셋업 (1h)
-- Spring Boot 프로젝트 생성, Gradle
+- Spring Boot 프로젝트 생성, Gradle (web + thymeleaf + jpa + security + validation)
 - `docker-compose.yml` 작성 (Postgres + Ollama + 앱)
-- Flyway 초기 마이그레이션 (`V1__init.sql`)
-- 공통 예외 핸들러, Springdoc OpenAPI, 환경변수 로딩
+- Flyway 초기 마이그레이션, 공통 예외 핸들러, Springdoc OpenAPI
 - Ollama 컨테이너에 `llama3.2:3b` pull
 
 ### Phase 1 — 인증 (1.5h)
-- `AppUser` 엔티티, BCrypt
-- Spring Security 6 + JWT 필터, `POST /api/auth/login`
-- `BootstrapAdminRunner` (어드민 시드, 환경변수 미설정 시 앱 시작 거부)
+- `AppUser` + BCrypt, Spring Security 6 + JWT
+- `POST /api/auth/login`, `BootstrapAdminRunner`
 
-### Phase 2 — 설문 도메인 & 검증 (3h)
-- 모든 enum (Industry, JobFunction, JobLevel, CompanySize, EmployeeCountRange, MonitoringStatus, AdoptionBlocker, PlanWithinYear, ConsultationPreference, InterestProduct)
-- `Lead` 엔티티 + `survey_payload` JSONB 매핑 (Hibernate `@JdbcTypeCode(SqlTypes.JSON)`)
-- `POST /api/leads` + `CompanyEmailIfNotStudentFreelancerValidator` + `SurveyPayloadValidator`
-- 휴대폰 정규화, 동의 검증, `retention_until` 자동 계산
-- 단위 테스트: 직무 분기, 도메인 차단, payload 분기 검증
+### Phase 2 — 설문 도메인 (3h)
+- 모든 enum + `Lead` 엔티티 + `survey_payload` JSONB
+- `POST /api/leads` + 모든 validator
+- 단위 테스트
 
-### Phase 3 — 추첨 + 재고 (2h)
+### Phase 3 — 폼 템플릿 + SSR 페이지 (3h)
+- `FormTemplate` 엔티티 + 시스템 기본 템플릿 시드 (와탭 폼을 JSON으로)
+- `SchemaValidator`
+- Thymeleaf 설문 폼 페이지 (`/survey/{eventCode}`) — 동적 schema 렌더링, HTMX 분기
+- Thank you / closed 페이지
+- 필드 타입별 fragment (text/select/radio/checkbox_multi/scale_1_10)
+
+### Phase 4 — QR + 풀스크린 페이지 (1h)
+- ZXing 의존성, `QrCodeService`
+- `/event/{eventCode}/qr.png` PNG
+- `/event/{eventCode}/qr` 풀스크린 페이지
+
+### Phase 5 — 추첨 + 재고 (2h)
 - `Event`, `Prize`, `DrawHistory`
-- 트랜잭션/비관적 락, 사전 랜덤 풀 알고리즘 (꽝 포함)
-- `GET /api/leads/search`, `POST /api/draw`, `GET /api/prizes`, `GET /api/draw/history`
-- 동시성 테스트 (100 동시 호출 → 1건만 성공)
+- 트랜잭션/비관적 락, 사전 랜덤 풀
+- `/api/leads/search`, `/api/draw`, `/api/prizes`, `/api/draw/history`
+- 동시성 테스트
 
-### Phase 4 — 어드민 핵심 (2h)
-- `/api/admin/events`, `/api/admin/prizes` CRUD
-- `/api/admin/users` 운영자 계정 관리
-- `/api/admin/leads` 조회 + 필터 + 상세
-- `DELETE /api/admin/leads/expired` 보존 만료 파기
+### Phase 6 — 어드민 핵심 + 폼 빌더 + CSV (4h)
+- `/api/admin/events`, `/api/admin/prizes`, `/api/admin/users`, `/api/admin/leads`
+- `/api/admin/forms/clone|PUT|DELETE`, `/admin/forms` SSR 페이지 (JSON 직편집 MVP)
+- `/api/admin/leads/expired` 만료 파기
+- `CsvExporter` + 리드 CSV (`/api/admin/leads/export.csv`) + 대시보드 CSV 5종
+- UTF-8 BOM, RFC 4180, 한국어 라벨 매핑 테이블
+- `StreamingResponseBody` + JPA `FETCH_SIZE`
 
-### Phase 5 — 대시보드 (3h)
-- `LeadAnalyticsService` 집계 로직
-- §4.B 7개 엔드포인트 구현
-- JSONB 집계 SQL (모니터링 제품, 만족도)
-- `@Cacheable` 60초 TTL
+### Phase 7 — 대시보드 (3h)
+- `LeadAnalyticsService` + §4.B 7개 엔드포인트
+- JSONB 집계 SQL, `@Cacheable` 60초
 
-### Phase 6 — AI (Ollama) (1.5h)
-- `OllamaClient` (WebClient, `format: "json"`)
-- `LeadScoreService` + 프롬프트 (Lead의 분류 필드 + 자유응답 요약)
-- 타임아웃 10s, 실패 폴백
+### Phase 8 — AI (Ollama) (1.5h)
+- `OllamaClient`, `LeadScoreService`, 폴백
 
-### Phase 7 — 통합 & 데모 (남는 시간)
-- 프론트 CORS, Swagger 캡처
-- 데모 시나리오 리허설 (어드민 행사·경품 세팅 → QR 설문 → 운영자 로그인 → 검색 → 뽑기 → AI 등급 → 대시보드)
-- 여유 시: `/api/ai/follow-up-message`, CSV/XLSX export, 자동 파기 배치
+### Phase 9 — 통합 & 데모 (남는 시간)
+- 데모 시나리오: 어드민 행사 생성 → 폼 커스텀 → 경품 세팅 → QR 풀스크린 → 모바일 QR 스캔 → 설문 → 운영자 로그인 → 검색 → 뽑기 → AI 등급 → 대시보드
+- 여유 시: 폼 시각화 빌더, follow-up message, XLSX export, 자동 파기 배치
 
 ---
 
@@ -1012,9 +1348,15 @@ curl http://localhost:8080/actuator/health
 - ✅ 차단 도메인 11개 (§5.3)
 - ✅ 풀 대시보드 7개 API (§4.B)
 - ✅ 설문 폼: 와탭 실제 설문 8페이지 분기 폼 반영
+- ✅ SSR: Thymeleaf로 설문/QR/폼 빌더 직접 렌더링
+- ✅ QR: ZXing PNG + 부스 풀스크린 페이지
+- ✅ 폼 빌더: FormTemplate JSONB schema, 행사별 복사·커스텀
+- ✅ 데이터 CSV 다운로드: 리드 + 대시보드 5종, UTF-8 BOM, 한국어 라벨, 스트리밍
 - [ ] Ollama JSON 응답 안정성 — `format: "json"` 강제만으로 충분한지, `function calling` 흉내(JSON 스키마 프롬프트) 필요한지 실측
-- [ ] 자동 파기 배치(Phase 6) — 어드민 수동 버튼만으로 갈지, `@Scheduled` 매일 새벽 잡 추가할지
-- [ ] 동의 철회 API — `event@whatap.io` 수신 수동 처리만 vs `POST /api/leads/{id}/withdraw` 엔드포인트 제공
+- [ ] 자동 파기 배치 — 어드민 수동 버튼만으로 갈지, `@Scheduled` 매일 새벽 잡 추가할지
+- [ ] 동의 철회 API — `event@whatap.io` 수신 수동 처리만 vs `POST /api/leads/{id}/withdraw`
+- [ ] 폼 빌더 UI 수준 — JSON 직편집 MVP 충분한지 vs 시각화 빌더(드래그앤드롭)까지 가야 하는지
+- [ ] QR 호스트 도메인 — 사내 호스팅 vs Cloudflare Tunnel vs ngrok 등 (현장 와이파이에서 모바일 접근 가능해야 함)
 
 ---
 
@@ -1027,7 +1369,10 @@ curl http://localhost:8080/actuator/health
 5. **역할 기반 접근 제어**: ADMIN(세팅·대시보드) / OPERATOR(현장 운영) 분리
 6. **JSONB 활용 풀 대시보드**: 8페이지 분기 설문 응답을 단일 컬럼에 보관, GIN 인덱스로 모니터링 제품·만족도 즉시 집계
 7. **법적 안전장치 내장**: 2년 자동 보존 + 만료 파기 API + 동의 시각 서버 기록
+8. **데이터 기반 폼 빌더**: 행사마다 폼을 JSONB로 정의·복사·커스텀 — 다음 행사에서 바로 재사용 가능
+9. **풀스크린 QR 페이지**: 부스 모니터에 띄울 수 있는 SSR 페이지 자동 생성, 1024×1024 PNG 캐시
+10. **즉시 분석 가능한 CSV**: 47컬럼 리드 export + 대시보드 5종 CSV — Excel에서 한글 안 깨지고 바로 피벗 가능
 
 ---
 
-*이 계획서는 화요일 개발 논의용 v3 (2026-05-28 결정사항 + 실제 와탭 설문 폼 반영) 입니다.*
+*이 계획서는 화요일 개발 논의용 v4 (SSR 페이지 + 폼 빌더 + CSV 다운로드 반영) 입니다.*
