@@ -702,12 +702,7 @@ export default function App() {
             alt="WhaTap"
             className="h-[48px] w-auto object-contain"
           />
-          <div className="flex w-[180px] justify-end">
-            <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => resetPickedState()}>
-              <RotateCcw className="size-3.5" aria-hidden="true" />
-              초기화
-            </Button>
-          </div>
+          <div className="w-[180px]" aria-hidden="true" />
         </header>
 
         <section className="flex min-h-0 flex-1 items-center justify-center">
