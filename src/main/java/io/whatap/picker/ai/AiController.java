@@ -22,6 +22,8 @@ import java.util.UUID;
 @RestController
 public class AiController {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AiController.class);
+
     private final LeadScoringPipeline pipeline;
     private final LeadScoreRepository repository;
     private final LeadRepository leadRepository;
@@ -102,7 +104,8 @@ public class AiController {
         }
 
         List<LeadScore> targets = new java.util.ArrayList<>();
-        if (req != null && Boolean.TRUE.equals(req.all())) {
+        boolean all = req != null && Boolean.TRUE.equals(req.all());
+        if (all) {
             // 전체 재분석 — MANUAL_OVERRIDE 만 보존, 그 외 모든 상태 큐잉
             for (AiStatus s : AiStatus.values()) {
                 if (s == AiStatus.MANUAL_OVERRIDE) continue;
@@ -114,9 +117,26 @@ public class AiController {
             targets.addAll(repository.findByAiStatus(AiStatus.PENDING));
             targets.addAll(repository.findByAiStatus(AiStatus.FAILED));
         }
+        log.info("rescore all={} eventCode={} candidates={}", all,
+                req == null ? null : req.eventCode(), targets.size());
+
         long queued = targets.stream().map(LeadScore::getLeadId)
                 .filter(eventFilter).peek(pipeline::score).count();
-        return Map.of("queued", queued);
+
+        // 처리 후 Stage 분포 — UI 가 결과 검증할 수 있도록.
+        java.util.Map<String, Long> dist = new java.util.LinkedHashMap<>();
+        dist.put("MQL", 0L); dist.put("KNOWN_LEAD", 0L); dist.put("PENDING_OR_OTHER", 0L);
+        for (LeadScore s : repository.findAll()) {
+            if (s.getGrade() == null) dist.merge("PENDING_OR_OTHER", 1L, Long::sum);
+            else dist.merge(s.getGrade().name(), 1L, Long::sum);
+        }
+        log.info("rescore done queued={} dist={}", queued, dist);
+
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("queued", queued);
+        out.put("candidates", targets.size());
+        out.put("distribution", dist);
+        return out;
     }
 
     public record ScoreRequest(@NotNull UUID leadId, Boolean force) {}

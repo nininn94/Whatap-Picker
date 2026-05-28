@@ -50,8 +50,15 @@ public class GlobalExceptionHandler {
                 .body(ApiErrorResponse.of(ErrorCode.UNAUTHORIZED, ex.getMessage()));
     }
 
-    @ExceptionHandler(NoHandlerFoundException.class)
-    public ResponseEntity<ApiErrorResponse> handleNotFound(NoHandlerFoundException ex) {
+    /**
+     * 404 매핑: 라우트 미스(NoHandlerFoundException) 와 static 리소스 미스
+     * (NoResourceFoundException, Spring 6.1+). 후자가 누락되면 catch-all
+     * @ExceptionHandler(Exception.class) 가 잡아서 500 으로 응답함 (favicon.ico
+     * 등 미존재 정적 파일 요청이 500 으로 새는 원인이었음).
+     */
+    @ExceptionHandler({NoHandlerFoundException.class,
+                       org.springframework.web.servlet.resource.NoResourceFoundException.class})
+    public ResponseEntity<ApiErrorResponse> handleNotFound(Exception ex) {
         return ResponseEntity.status(ErrorCode.NOT_FOUND.status())
                 .body(ApiErrorResponse.of(ErrorCode.NOT_FOUND, ex.getMessage()));
     }

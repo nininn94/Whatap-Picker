@@ -421,7 +421,8 @@
         if (!confirm(`${scope} 모든 리드를 (MANUAL_OVERRIDE 제외) 새 룰로 다시 분류할까요? Stage 결과가 갱신됩니다.`)) return;
         try {
             const r = await adminApi.post('/api/admin/leads/rescore', { eventCode: ec || null, all: true });
-            toast(`${r.queued}건 재분석 시작`);
+            const d = r.distribution || {};
+            toast(`재분석 ${r.queued}/${r.candidates}건 — MQL ${d.MQL ?? 0} · Known ${d.KNOWN_LEAD ?? 0} · 기타 ${d.PENDING_OR_OTHER ?? 0}`);
             setTimeout(() => { loadPending(); loadLeads(); }, 1500);
         } catch (e) { toast(e.message, true); }
     }
