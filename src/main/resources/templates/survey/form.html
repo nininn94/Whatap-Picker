@@ -10,7 +10,7 @@
         <p class="event-label" th:text="${event.label}"></p>
     </header>
 
-    <form id="survey-form" @submit.prevent="submit">
+    <form id="survey-form" novalidate @submit.prevent="submit">
         <input type="hidden" name="eventCode" th:value="${event.eventCode}" x-ref="eventCode">
 
         <!-- 페이지 순회 -->
