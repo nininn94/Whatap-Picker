@@ -37,33 +37,21 @@ const adminApi = (() => {
         async del(path) {
             return handle(await fetch(path, { method:'DELETE', credentials:'same-origin', headers: headers() }));
         },
+        /**
+         * CSV / 파일 다운로드.
+         * 인증은 HttpOnly 쿠키로 자동 동행 → fetch+blob 패턴(혹은 그 안에서의
+         * URL.createObjectURL revoke 타이밍) 없이 native browser download 로
+         * 처리해 blob URL 이슈(ERR_NAME_NOT_RESOLVED 등) 회피.
+         */
         async download(path, filename) {
-            // 다운로드는 text/csv 등 임의 컨텐츠 타입을 받아야 하므로 Accept: */*.
-            const h = { 'Accept': '*/*' };
-            if (token()) h['Authorization'] = 'Bearer ' + token();
-            const res = await fetch(path, { credentials:'same-origin', headers: h });
-            if (!res.ok) {
-                let msg = `다운로드 실패 (${res.status})`;
-                try { const t = await res.text(); const j = JSON.parse(t); if (j.message) msg = j.message; } catch {}
-                throw new Error(msg);
-            }
-            const cd = res.headers.get('Content-Disposition') || '';
-            const m = cd.match(/filename="?([^";]+)"?/i);
-            const name = filename || (m ? decodeURIComponent(m[1]) : 'download.csv');
-            const blob = await res.blob();
-            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = url;
-            a.download = name;
+            a.href = path;
+            if (filename) a.download = filename;
             a.rel = 'noopener';
+            // download 속성을 anchor 에 두면 브라우저가 Content-Disposition 을 우선 사용.
             document.body.appendChild(a);
             a.click();
-            // Chrome 은 blob URL 을 다운로드 도중에도 참조하므로 즉시 revoke 하면
-            // ERR_NAME_NOT_RESOLVED / "blob 을 찾을 수 없음" 으로 실패. 1.5초 지연.
-            setTimeout(() => {
-                a.remove();
-                URL.revokeObjectURL(url);
-            }, 1500);
+            setTimeout(() => a.remove(), 1500);
         }
     };
 })();
