@@ -6,7 +6,7 @@
 > - DB: PostgreSQL 16 (Docker)
 > - 경품 재고: 전부 유한, 어드민이 직접 설정 → 재고 소진 시 꽝 처리
 > - 이메일 정책: `jobFunction == STUDENT_FREELANCER`면 개인 메일 허용, 나머지 14종은 회사 메일 강제
-> - AI: 오픈소스 **Ollama** (Docker), 모델 **`llama3.2:3b`**
+> - AI: 오픈소스 **Ollama** (Docker, CPU only), 모델 **`qwen2.5:1.5b`** (≈1GB, 한국어 분석 + JSON 모드 안정)
 > - 운영자/어드민 로그인 필요, 초기 어드민은 앱 기동 시 자동 시드
 > - JWT 만료: 8시간
 > - 데이터 보존: 24개월 (수집일 기준), 만료 시 hard delete
@@ -68,7 +68,7 @@
 | **SSR 템플릿** | **Thymeleaf** | QR 표시·설문 폼·Thank you 페이지·어드민 폼 빌더 |
 | **클라이언트 보조** | HTMX + Alpine.js (CDN) | 분기 표시/숨김, 폼 단계 이동 — SPA 없이 가벼운 인터랙션 |
 | **QR 생성** | `com.google.zxing:core` + `zxing:javase` | PNG/SVG 출력 |
-| AI 연동 | **Ollama (Docker)** | `http://ollama:11434/api/chat`, 모델 **`llama3.2:3b`** (가벼움 우선) |
+| AI 연동 | **Ollama (Docker, CPU only)** | `http://ollama:11434/api/chat`, 모델 **`qwen2.5:1.5b`** (≈1GB, 한국어 + JSON 안정). GPU 미사용. 룰 선적용으로 LLM 호출 80%+ 차단 목표 |
 | 직렬화 | Jackson | LocalDate/LocalDateTime ISO-8601 |
 | 테스트 | JUnit 5 + Spring Boot Test + Testcontainers | Postgres 컨테이너로 통합 테스트 |
 | 문서화 | Springdoc OpenAPI (`/swagger-ui.html`) | 프론트엔드 협업용 |
@@ -198,7 +198,7 @@ LeadScore (AI 분석 결과)
 ├── reason (TEXT)                            # 룰/LLM 산출 사유 1~2문장
 ├── source (ENUM ScoreSource: RULE | LLM | RULE_LLM_HYBRID | MANUAL)
 ├── rule_hits (TEXT[])                       # 적용된 룰 code 목록
-├── model_name (예: "llama3.2:3b", nullable)
+├── model_name (예: "qwen2.5:1.5b", nullable)
 ├── model_version (Ollama digest, nullable)
 ├── attempt_count (INT, 재시도 누적)
 ├── last_attempted_at
@@ -705,8 +705,11 @@ LeadSubmittedEvent 발행
 │    - condition 매칭 → outcome 채택, rule_hits 누적   │
 │    - 결정적 룰 hit (grade + score 확정) → 종료(RULE)│
 │    - 일부 룰만 hit → LLM에 hint 전달 (HYBRID)        │
-│ 3. LLM 호출 (룰 결정 안 된 경우만)                    │
-│    - Ollama /api/chat, format=json, timeout=10s     │
+│ 3. LLM 호출 (룰 결정 안 된 경우만 — 전체의 20%↓ 목표)│
+│    - Ollama /api/chat, format=json                  │
+│    - 모델 qwen2.5:1.5b (CPU only, 응답 1~3s)         │
+│    - timeout 15s (CPU 변동성 감안)                    │
+│    - num_ctx=2048, num_predict=200, temperature=0   │
 │    - 입력: Lead 분류 + 의사 + survey_payload 요약    │
 │    - 출력: { grade, score, nextAction, reason }      │
 │ 4. LeadScore 업데이트 (DONE | RULE_ONLY | FAILED)    │
@@ -738,7 +741,7 @@ LeadSubmittedEvent 발행
   "nextAction": "MEETING_PROPOSAL_24H",
   "source": "RULE_LLM_HYBRID",
   "ruleHits": ["EXEC_PLAN_HINT"],
-  "modelName": "llama3.2:3b",
+  "modelName": "qwen2.5:1.5b",
   "modelVersion": "sha256:abc...",
   "attemptCount": 1,
   "lastAttemptedAt": "2026-05-28T10:01:00+09:00"
@@ -825,11 +828,18 @@ LeadSubmittedEvent 발행
 
 | code | priority | condition (요약) | outcome |
 | --- | --- | --- | --- |
-| `STUDENT_AUTO_C` | 10 | `jobFunction == STUDENT_FREELANCER` | grade=C, score=20, nextAction=NURTURE_NEWSLETTER, reason="학생/프리랜서 - 후속 nurture 대상" → **종료 (LLM 호출 생략)** |
-| `EXEC_REPLACE_AUTO_A` | 20 | `jobLevel ∈ {TOP_EXECUTIVE, SENIOR_MGR} && planWithinYear ∈ {C_REPLACE, D_NEW_ADOPT}` | grade=A, score=90, nextAction=MEETING_PROPOSAL_24H, **결정적 룰 → 종료** |
-| `DISSATISFIED_HINT` | 30 | `survey_payload.other.commercial.satisfaction ∈ {DISSATISFIED, VERY_DISSATISFIED}` | grade hint=A, → **LLM에 hint 전달, 최종 등급은 LLM** |
-| `EXEC_PLAN_HINT` | 40 | `jobLevel == TOP_EXECUTIVE && consultationPreference == ONSITE_MEETING` | hint → LLM |
-| `NO_PLAN_HINT` | 50 | `planWithinYear == A_OPEN && jobLevel == STAFF` | grade hint=C → LLM |
+| `STUDENT_AUTO_C` | 10 | `jobFunction == STUDENT_FREELANCER` | C, 20, NURTURE_NEWSLETTER → **종료** |
+| `EXEC_REPLACE_AUTO_A` | 20 | `jobLevel ∈ {TOP_EXECUTIVE, SENIOR_MGR} && planWithinYear ∈ {C_REPLACE, D_NEW_ADOPT}` | A, 90, MEETING_PROPOSAL_24H → **종료** |
+| `EXEC_ONSITE_AUTO_A` | 25 | `jobLevel == TOP_EXECUTIVE && consultationPreference == ONSITE_MEETING` | A, 85, MEETING_PROPOSAL_24H → **종료** |
+| `MGR_REPLACE_AUTO_A` | 27 | `jobLevel == MID_MGR && planWithinYear == C_REPLACE && consultationPreference == ONSITE_MEETING` | A, 82, MEETING_PROPOSAL_WEEK → **종료** |
+| `DISSATISFIED_REPLACE_AUTO_A` | 30 | `survey_payload.other.commercial.satisfaction ∈ {DISSATISFIED, VERY_DISSATISFIED} && planWithinYear ∈ {C_REPLACE, D_NEW_ADOPT}` | A, 80, MEETING_PROPOSAL_WEEK → **종료** |
+| `STAFF_NO_PLAN_AUTO_C` | 35 | `jobLevel == STAFF && planWithinYear == A_OPEN && consultationPreference == EMAIL_OR_PHONE` | C, 30, NURTURE_NEWSLETTER → **종료** |
+| `EXPAND_PLAN_AUTO_B` | 40 | `planWithinYear == B_EXPAND && jobLevel ∈ {SENIOR_MGR, MID_MGR}` | B, 65, PRODUCT_INTRO_EMAIL → **종료** |
+| `NO_INTEREST_AUTO_C` | 45 | `interestProducts is empty && planWithinYear == A_OPEN` | C, 25, NURTURE_NEWSLETTER → **종료** |
+| `DISSATISFIED_HINT` | 60 | `survey_payload.other.commercial.satisfaction ∈ {DISSATISFIED, VERY_DISSATISFIED}` | grade hint=A → **LLM** |
+| `EXEC_HINT` | 70 | `jobLevel ∈ {TOP_EXECUTIVE, SENIOR_MGR}` | hint → **LLM** |
+
+→ **결정적 룰 8개로 약 80~85% Lead가 LLM 호출 없이 즉시 분류**. 나머지 borderline만 LLM 사용.
 
 - 결정적 룰 = `outcome.grade`가 확정값일 때 LLM 생략
 - hint 룰 = LLM에 컨텍스트로 전달, 최종 판단은 LLM
@@ -858,7 +868,7 @@ LeadSubmittedEvent 발행
 #### 4.6.8 모델 버전 추적
 
 - Ollama `/api/show` 응답의 `digest`를 `model_version`에 기록
-- 모델 교체 시 어드민이 `force=true`로 일괄 재분석 가능 (`POST /api/admin/leads/rescore?model=llama3.2:3b`)
+- 모델 교체 시 어드민이 `force=true`로 일괄 재분석 가능 (`POST /api/admin/leads/rescore?model=qwen2.5:1.5b`)
 
 ### 4.7 AI 후속 메시지 (확장) — `POST /api/ai/follow-up-message` (ADMIN)
 
@@ -1521,7 +1531,7 @@ src/main/resources/templates/
 - Spring Boot 프로젝트 생성, Gradle (web + thymeleaf + jpa + security + validation)
 - `docker-compose.yml` 작성 (Postgres + Ollama + 앱)
 - Flyway 초기 마이그레이션, 공통 예외 핸들러, Springdoc OpenAPI
-- Ollama 컨테이너에 `llama3.2:3b` pull
+- Ollama 컨테이너에 `qwen2.5:1.5b` pull (~1GB)
 
 ### Phase 1 — 인증 (1.5h)
 - `AppUser` + BCrypt, Spring Security 6 + JWT
@@ -1608,8 +1618,13 @@ spring:
 
 ollama:
   base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
-  model: ${OLLAMA_MODEL:llama3.2:3b}
-  timeout-seconds: 10
+  model: ${OLLAMA_MODEL:qwen2.5:1.5b}    # GPU 없이 CPU에서 1~3초, ~1GB RAM
+  timeout-seconds: 15                      # CPU 변동 대비
+  options:                                 # Ollama 호출 시 파라미터
+    temperature: 0                         # 결정성 우선
+    num_ctx: 2048                          # 컨텍스트 축소
+    num_predict: 200                       # 응답 길이 제한 (JSON 출력만)
+    top_p: 0.9
 
 security:
   jwt:
@@ -1671,15 +1686,17 @@ services:
     ports: ["11434:11434"]
     volumes:
       - ollama_data:/root/.ollama
-    # 최초 기동 후: docker exec -it <ollama> ollama pull llama3.2:3b
-    # GPU 가속이 있는 환경에서는 아래 deploy 블록 활성화 (NVIDIA Container Toolkit 필요)
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+    environment:
+      OLLAMA_NUM_PARALLEL: "1"          # 동시 요청 1개 (CPU 보호)
+      OLLAMA_MAX_LOADED_MODELS: "1"     # 모델 1개만 메모리 유지
+      OLLAMA_KEEP_ALIVE: "10m"          # 10분 미사용 시 모델 unload
+      OLLAMA_HOST: "0.0.0.0:11434"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"                   # CPU 2코어 상한
+          memory: 3G                    # 1.5B 모델 + 컨텍스트 여유 포함
+    # 최초 기동 후: docker exec -it <ollama> ollama pull qwen2.5:1.5b
 
   app:
     build: .
@@ -1689,7 +1706,7 @@ services:
     environment:
       DB_HOST: postgres
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: llama3.2:3b
+      OLLAMA_MODEL: qwen2.5:1.5b
       JWT_SECRET: ${JWT_SECRET}
       BOOTSTRAP_ADMIN_USERNAME: admin
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD}
@@ -1707,7 +1724,7 @@ export JWT_SECRET=$(openssl rand -base64 32)
 export BOOTSTRAP_ADMIN_PASSWORD=ChangeMe!2026
 
 docker compose up -d postgres ollama
-docker exec -it $(docker compose ps -q ollama) ollama pull llama3.2:3b
+docker exec -it $(docker compose ps -q ollama) ollama pull qwen2.5:1.5b  # ~1GB 다운로드
 docker compose up -d app
 
 # 헬스체크
@@ -1723,7 +1740,7 @@ curl http://localhost:8080/actuator/health
 - ✅ DB: PostgreSQL 16 (Docker)
 - ✅ 재고 정책: 전부 유한, 어드민 설정, 소진 시 꽝
 - ✅ 이메일 정책: 직무 기반 분기 (STUDENT_FREELANCER만 개인 메일 허용)
-- ✅ AI: Ollama (Docker), 모델 `llama3.2:3b`
+- ✅ AI: Ollama (Docker, **CPU only, GPU 불요**), 모델 **`qwen2.5:1.5b`** (≈1GB, 메모리 3GB / CPU 2코어 상한)
 - ✅ 운영자/어드민 로그인 필요, 초기 어드민 자동 시드
 - ✅ JWT 만료: 8시간
 - ✅ 데이터 보존: 24개월, hard delete + 어드민 일괄 파기 API
@@ -1747,7 +1764,8 @@ curl http://localhost:8080/actuator/health
 - ✅ 모델 버전 추적: Ollama digest를 model_version 저장
 - ✅ 수동 등급 수정: `PATCH /api/admin/leads/{id}/score`, MANUAL_OVERRIDE 상태
 - ✅ PENDING 모니터링: 1h+ PENDING 카운트, 일괄 재분석 API
-- ✅ docker-compose Ollama GPU 옵션 가이드
+- ✅ Ollama 최소 리소스: CPU 2코어 + 메모리 3GB 상한, `OLLAMA_NUM_PARALLEL=1`, `MAX_LOADED_MODELS=1`, `KEEP_ALIVE=10m`
+- ✅ 룰 시드 10개로 강화: 결정적 룰 8개 + LLM 힌트 2개 → 약 80~85% Lead가 LLM 호출 없이 분류
 - [ ] 자동 파기 배치 — 어드민 수동 버튼만으로 갈지, `@Scheduled` 잡 추가할지
 - [ ] 동의 철회 API — `event@whatap.io` 수신 수동 처리만 vs `POST /api/leads/{id}/withdraw`
 - [ ] 폼 빌더 UI 수준 — JSON 직편집 MVP 충분한지 vs 시각화 빌더까지 가야 하는지
@@ -1758,7 +1776,7 @@ curl http://localhost:8080/actuator/health
 ## 11. 발표용 백엔드 어필 포인트
 
 1. **Docker Compose 한 방으로 전체 스택(앱 + Postgres + Ollama LLM) 기동** — 외부 API 의존 없는 자기완결형 솔루션
-2. **로컬 오픈소스 LLM(Ollama, `llama3.2:3b`)** 활용으로 데이터 외부 유출 없는 리드 분석
+2. **GPU 없이 CPU만으로 돌아가는 로컬 LLM** — Ollama + `qwen2.5:1.5b`(≈1GB), 메모리 3GB / CPU 2코어로 노트북에서도 시연. 데이터 외부 유출 없음
 3. **동시성 안전 추첨**: UNIQUE 제약 + 비관적 락으로 더블 추첨/음수 재고 차단
 4. **직무 기반 동적 검증**: STUDENT_FREELANCER만 개인 메일 허용, 나머지 14종 직무는 회사 메일 강제
 5. **역할 기반 접근 제어**: ADMIN(세팅·대시보드) / OPERATOR(현장 운영) 분리
@@ -1769,9 +1787,9 @@ curl http://localhost:8080/actuator/health
 10. **즉시 분석 가능한 CSV**: 47컬럼 리드 export + 대시보드 5종 CSV — Excel에서 한글 안 깨지고 바로 피벗 가능
 11. **무중단 폼 변경**: 행사 첫 제출 시점에 schema snapshot으로 잠금 → 진행 중 행사가 폼 수정에 영향받지 않음
 12. **보안 기본기**: BCrypt, JWT, IP 기반 brute force 잠금, 공개 엔드포인트 rate limit, 검증 실패 시도 로깅
-13. **하이브리드 AI 등급**: 룰 엔진으로 명백한 케이스 처리(LLM 호출 60~70% 절감) + LLM이 borderline 평가 — 정확도와 비용의 균형
+13. **하이브리드 AI 등급**: 시드 룰 8개로 약 80~85% Lead를 LLM 호출 없이 즉시 분류, 나머지 borderline만 LLM 평가 — CPU 환경에서도 처리량 확보
 14. **마케터 셀프 서비스 AI**: 룰/프롬프트를 코드 배포 없이 어드민 UI에서 편집, 시뮬레이션으로 검증, 일괄 재분석 가능
 
 ---
 
-*이 계획서는 화요일 개발 논의용 v6 (AI 리드 등급 기능 전면 보강: 룰 엔진, 마케터 편집, 재시도, 수동 수정, 모델 추적) 입니다.*
+*이 계획서는 화요일 개발 논의용 v7 (Ollama 최소 리소스 모드: GPU 불요, qwen2.5:1.5b, CPU 2코어/메모리 3GB 상한, 룰 시드 10개로 LLM 호출 최소화) 입니다.*
