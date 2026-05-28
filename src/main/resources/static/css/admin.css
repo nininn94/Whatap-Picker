@@ -370,6 +370,68 @@ pre.code-block {
     border: 1px solid var(--border);
 }
 
+/* ──────────────────  대시보드 가시성 강화  ────────────────── */
+
+.dashboard-anchors {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin: -4px 0 16px; padding: 8px 12px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); align-items: center;
+}
+.dashboard-anchors a {
+    padding: 4px 10px; border-radius: 6px; font-size: 0.82rem;
+    color: var(--text-muted); text-decoration: none;
+}
+.dashboard-anchors a:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
+.dashboard-stale { margin-left: auto; font-size: 0.78rem; }
+
+.dashboard-section { scroll-margin-top: 16px; margin-bottom: 8px; }
+.section-title { font-size: 1rem; color: var(--text-muted); margin: 16px 0 8px;
+                 text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+
+/* CSV 내보내기 드롭다운 */
+.export-menu { position: relative; }
+.export-menu > summary { list-style: none; cursor: pointer; }
+.export-menu > summary::-webkit-details-marker { display: none; }
+.export-menu-content {
+    position: absolute; top: calc(100% + 4px); right: 0;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow-md);
+    min-width: 200px; z-index: 100; padding: 4px;
+    display: flex; flex-direction: column;
+}
+.export-menu-content button {
+    background: transparent; border: none; padding: 8px 12px;
+    text-align: left; cursor: pointer; border-radius: 4px;
+    font: inherit; color: var(--text);
+}
+.export-menu-content button:hover { background: var(--surface-2); }
+
+/* Chart container — 차트 높이 통일, 반응형 */
+.chart-container       { position: relative; height: 240px; }
+.chart-container-tall  { position: relative; height: 320px; }
+
+/* Prize progress bar list */
+.prize-progress-list { display: flex; flex-direction: column; gap: 12px; }
+.prize-row {
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 12px 14px;
+}
+.prize-row-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.prize-rank {
+    background: #1e293b; color: #fff; padding: 2px 8px;
+    border-radius: 4px; font-size: 0.78rem; font-weight: 700; flex-shrink: 0;
+}
+.prize-name  { flex: 1; }
+.prize-stats { color: var(--text-muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.prize-bar {
+    height: 8px; background: #e5e7eb; border-radius: 999px; overflow: hidden;
+}
+.prize-bar-fill { height: 100%; transition: width .4s; border-radius: 999px; }
+.prize-bar-ok     { background: linear-gradient(90deg, #16a34a, #4ade80); }
+.prize-bar-warn   { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.prize-bar-danger { background: linear-gradient(90deg, #dc2626, #f87171); }
+
 /* ──────────────────  리드 페이지 가시성 강화  ────────────────── */
 
 /* KPI 스트립 */

@@ -4,12 +4,12 @@
 <body class="admin-body">
 <nav th:replace="~{admin/layout :: nav('dashboard')}"></nav>
 
-<main class="admin-container">
+<main class="admin-container wide">
     <header class="page-header">
         <div class="title-block">
             <p class="breadcrumb"><a th:href="@{/admin}">홈</a><span class="sep">›</span>대시보드</p>
             <h1>대시보드</h1>
-            <p class="subtitle">행사별 또는 전체 통계를 보고, 마케팅 인사이트를 LLM 으로 생성합니다.</p>
+            <p class="subtitle">행사별 또는 전체 통계 · 차트로 즉시 파악 · 마케팅 인사이트 LLM 자동 생성.</p>
         </div>
         <div class="actions">
             <select id="event-filter">
@@ -17,145 +17,458 @@
                 <option th:each="e : ${events}" th:value="${e.eventCode}" th:text="|${e.eventCode} - ${e.label}|"></option>
             </select>
             <button class="btn btn-secondary" onclick="loadAll()">↻ 새로고침</button>
+            <details class="export-menu">
+                <summary class="btn btn-secondary">📥 CSV ▾</summary>
+                <div class="export-menu-content">
+                    <button onclick="exportSummary()">요약 (summary)</button>
+                    <button onclick="exportSegments()">세그먼트</button>
+                    <button onclick="exportMonitoring()">모니터링</button>
+                    <button onclick="exportIntent()">관심/도입의사</button>
+                    <button onclick="exportTimeline()">타임라인</button>
+                </div>
+            </details>
+            <button class="btn btn-primary" onclick="generateInsight()">🤖 AI 인사이트</button>
         </div>
     </header>
 
-    <div class="card">
-        <div class="card-header">
-            <h2>CSV 내보내기</h2>
-            <div class="spacer" style="flex:1;"></div>
-            <div class="btn-group">
-                <button class="btn btn-sm btn-secondary" onclick="exportSummary()">요약</button>
-                <button class="btn btn-sm btn-secondary" onclick="exportSegments()">세그먼트</button>
-                <button class="btn btn-sm btn-secondary" onclick="exportMonitoring()">모니터링</button>
-                <button class="btn btn-sm btn-secondary" onclick="exportIntent()">관심</button>
+    <!-- 앵커 메뉴 + 마지막 업데이트 시간 -->
+    <div class="dashboard-anchors">
+        <a href="#sec-kpi">핵심 지표</a>
+        <a href="#sec-timeline">추이</a>
+        <a href="#sec-stage">Stage</a>
+        <a href="#sec-prizes">경품</a>
+        <a href="#sec-segments">세그먼트</a>
+        <a href="#sec-intent">관심/도입</a>
+        <a href="#sec-monitoring">모니터링</a>
+        <a href="#sec-whatap">와탭 활용도</a>
+        <a href="#sec-insight">AI 인사이트</a>
+        <span class="dashboard-stale muted" id="dashboard-stale"></span>
+    </div>
+
+    <!-- ─── 핵심 KPI ─── -->
+    <section id="sec-kpi" class="dashboard-section">
+        <h2 class="section-title">📊 핵심 지표</h2>
+        <div class="kpi-strip" id="summary-cards">
+            <div class="kpi-card kpi-loading">로딩 중...</div>
+        </div>
+    </section>
+
+    <!-- ─── 제출/추첨 추이 (Timeline) ─── -->
+    <section id="sec-timeline" class="dashboard-section">
+        <div class="card">
+            <div class="card-header">
+                <h2>📈 제출 / 추첨 / 상담 추이</h2>
+                <div class="spacer" style="flex:1;"></div>
+                <div class="btn-group">
+                    <button class="btn btn-sm btn-secondary" data-range="7"  onclick="setTimelineRange(7)">최근 7일</button>
+                    <button class="btn btn-sm btn-secondary" data-range="30" onclick="setTimelineRange(30)">30일</button>
+                    <button class="btn btn-sm btn-primary"   data-range="0"  onclick="setTimelineRange(0)" id="range-all">전체</button>
+                </div>
+            </div>
+            <div class="chart-container chart-container-tall">
+                <canvas id="timeline-chart"></canvas>
+            </div>
+            <p id="timeline-empty" class="muted" style="display:none; text-align:center; padding:24px 0;">선택 기간에 데이터가 없습니다.</p>
+        </div>
+    </section>
+
+    <!-- ─── Stage 분포 + 상담 ─── -->
+    <section id="sec-stage" class="dashboard-section">
+        <div class="grid-2">
+            <div class="card">
+                <h2>🎯 Lifecycle Stage 분포</h2>
+                <div class="chart-container">
+                    <canvas id="grade-chart"></canvas>
+                </div>
+                <div id="grade-summary" class="muted" style="margin-top:8px;"></div>
+            </div>
+            <div class="card">
+                <h2>💼 상담 희망 채널</h2>
+                <div class="chart-container">
+                    <canvas id="consult-chart"></canvas>
+                </div>
+                <div id="consult-summary" class="muted" style="margin-top:8px;"></div>
             </div>
         </div>
-    </div>
+    </section>
 
-    <div class="dashboard-grid" id="summary-cards"></div>
+    <!-- ─── 경품 진행 ─── -->
+    <section id="sec-prizes" class="dashboard-section">
+        <div class="card">
+            <div class="card-header">
+                <h2>🎁 경품 진행 (선택된 행사)</h2>
+                <span id="prize-meta" class="muted"></span>
+            </div>
+            <div id="prize-empty" class="muted" style="display:none; text-align:center; padding:24px 0;">행사를 선택하면 경품 진행률이 표시됩니다.</div>
+            <div id="prize-list" class="prize-progress-list"></div>
+        </div>
+    </section>
 
-    <div class="card">
-        <h2>Lifecycle Stage 분포</h2>
-        <canvas id="grade-chart" height="80"></canvas>
-    </div>
-
-    <div class="card">
-        <h2>산업 / 직급</h2>
+    <!-- ─── 산업 / 직급 / 직무 / 기업규모 ─── -->
+    <section id="sec-segments" class="dashboard-section">
+        <h2 class="section-title">👥 세그먼트</h2>
         <div class="grid-2">
-            <canvas id="industry-chart"></canvas>
-            <canvas id="joblevel-chart"></canvas>
+            <div class="card"><h2>🏢 산업</h2><div class="chart-container"><canvas id="industry-chart"></canvas></div></div>
+            <div class="card"><h2>👔 직급</h2><div class="chart-container"><canvas id="joblevel-chart"></canvas></div></div>
         </div>
-    </div>
-
-    <div class="card">
-        <h2>관심 제품 / 1년 내 계획</h2>
         <div class="grid-2">
-            <canvas id="interest-chart"></canvas>
-            <canvas id="plan-chart"></canvas>
+            <div class="card"><h2>🛠 직무</h2><div class="chart-container"><canvas id="jobfunction-chart"></canvas></div></div>
+            <div class="card"><h2>🏗 기업 규모</h2><div class="chart-container"><canvas id="companysize-chart"></canvas></div></div>
         </div>
-    </div>
+    </section>
 
-    <div class="card">
-        <h2>모니터링 사용 현황 (raw)</h2>
-        <pre id="monitoring-data" class="code-block" style="max-height:300px;"></pre>
-    </div>
+    <!-- ─── 관심 / 도입의사 ─── -->
+    <section id="sec-intent" class="dashboard-section">
+        <h2 class="section-title">🎯 관심 / 도입 의사</h2>
+        <div class="grid-2">
+            <div class="card"><h2>🔍 관심 제품</h2><div class="chart-container"><canvas id="interest-chart"></canvas></div></div>
+            <div class="card"><h2>📅 1년 내 계획</h2><div class="chart-container"><canvas id="plan-chart"></canvas></div></div>
+        </div>
+        <div class="grid-2">
+            <div class="card"><h2>🚧 도입 망설이는 이유</h2><div class="chart-container"><canvas id="blocker-chart"></canvas></div></div>
+            <div class="card"><h2>📡 모니터링 상태</h2><div class="chart-container"><canvas id="monstatus-chart"></canvas></div></div>
+        </div>
+    </section>
 
-    <div class="card">
-        <div class="card-header">
-            <h2>🤖 마케팅 인사이트 (LLM 자동 분석)</h2>
-            <div class="spacer" style="flex:1;"></div>
-            <button class="btn btn-primary" id="insight-btn" onclick="generateInsight()">인사이트 생성</button>
+    <!-- ─── 모니터링 사용 현황 ─── -->
+    <section id="sec-monitoring" class="dashboard-section">
+        <h2 class="section-title">📊 모니터링 사용 현황</h2>
+        <div class="grid-2">
+            <div class="card"><h2>💰 사용 중 상용툴</h2><div class="chart-container"><canvas id="commercial-chart"></canvas></div></div>
+            <div class="card"><h2>🆓 사용 중 오픈소스</h2><div class="chart-container"><canvas id="opensource-chart"></canvas></div></div>
         </div>
-        <p class="muted">
-            현재 선택된 행사의 통계를 LLM 이 분석해 마케팅팀이 즉시 활용할 인사이트를 생성합니다.
-            Ollama → 실패 시 Anthropic Claude (어드민 <a th:href="@{/admin/settings}">설정</a>에서 키 등록).
-        </p>
-        <p id="insight-meta" class="muted"></p>
-        <div id="insight-content" class="code-block" style="white-space:pre-wrap; line-height:1.6; font-family:inherit; min-height:80px;">
-            (아직 생성되지 않음)
+        <div class="grid-2">
+            <div class="card"><h2>😊 상용 만족도</h2><div class="chart-container"><canvas id="satisfaction-chart"></canvas></div></div>
+            <div class="card"><h2>🔄 교체 이유</h2><div class="chart-container"><canvas id="switch-chart"></canvas></div></div>
         </div>
-    </div>
+    </section>
+
+    <!-- ─── 와탭 활용도 ─── -->
+    <section id="sec-whatap" class="dashboard-section">
+        <div class="card">
+            <div class="card-header">
+                <h2>🛠️ 와탭 활용도 (USING_WHATAP 응답자)</h2>
+                <span id="whatap-meta" class="muted"></span>
+            </div>
+            <div class="grid-2">
+                <div><h3 style="font-size:0.95rem;">활용도 분포 (1~10)</h3>
+                    <div class="chart-container"><canvas id="proficiency-chart"></canvas></div></div>
+                <div><h3 style="font-size:0.95rem;">필요한 도움</h3>
+                    <div class="chart-container"><canvas id="needed-chart"></canvas></div></div>
+            </div>
+            <p id="whatap-empty" class="muted" style="display:none; text-align:center; padding:16px 0;">와탭 사용 응답자가 없습니다.</p>
+        </div>
+    </section>
+
+    <!-- ─── AI 인사이트 ─── -->
+    <section id="sec-insight" class="dashboard-section">
+        <div class="card">
+            <div class="card-header">
+                <h2>🤖 AI 마케팅 인사이트</h2>
+                <span id="insight-meta" class="muted"></span>
+                <div class="spacer" style="flex:1;"></div>
+                <button class="btn btn-sm btn-primary" id="insight-btn" onclick="generateInsight()">인사이트 생성</button>
+            </div>
+            <p class="muted">
+                Ollama → 실패 시 Anthropic Claude
+                (어드민 <a th:href="@{/admin/settings}">설정</a>에서 키 등록).
+                선택된 행사의 통계를 LLM 이 분석합니다.
+            </p>
+            <div id="insight-content" class="code-block" style="white-space:pre-wrap; line-height:1.6; font-family:inherit; min-height:80px;">
+                (아직 생성되지 않음)
+            </div>
+        </div>
+    </section>
 </main>
 
 <script>
+    // ── 컬러 팔레트 ──
+    const PALETTE = ['#2563eb','#16a34a','#dc2626','#f59e0b','#8b5cf6','#06b6d4','#64748b','#e11d48','#0891b2','#a855f7','#facc15','#0f766e','#1e40af','#be185d','#92400e','#475569'];
+    const STAGE_COLORS = { A:'#16a34a', B:'#2563eb', C:'#64748b', PENDING:'#f59e0b' };
+
+    // ── enum 한국어 라벨 (리드 페이지와 동일 매핑) ──
+    const LABELS = {
+        industry: { FINANCE_INSURANCE:'금융/보험', EDUCATION_RESEARCH:'교육/연구', IT_SERVICES:'IT 서비스',
+                    GOVT_PUBLIC:'공공', HEALTHCARE:'의료', MANUFACTURING:'제조', RETAIL_ECOMMERCE:'유통/이커머스',
+                    LOGISTICS:'물류', LIFE_SCIENCE:'바이오', TELECOM:'통신', MEDIA_ENTERTAINMENT:'미디어',
+                    PROFESSIONAL_SERVICES:'전문서비스', ENERGY_RESOURCES:'에너지', HOTEL_TOURISM:'호텔/관광',
+                    SERVICE_INDUSTRY:'서비스업', OTHER:'기타' },
+        jobFunction: { DEVOPS:'DevOps', IT_OPS:'IT 운영', SRE:'SRE', DEVELOPER:'개발자', R_AND_D:'R&D',
+                       IT_PLANNING:'IT 기획', SECURITY:'보안', CONSULTING:'컨설팅', DATA:'데이터',
+                       INFRA:'인프라', MARKETING_SALES:'마케팅/영업', FINANCE_BACKOFFICE:'재무/지원',
+                       EXECUTIVE:'임원', STUDENT_FREELANCER:'학생/프리랜서', OTHER:'기타' },
+        jobLevel: { TOP_EXECUTIVE:'C-Level', SENIOR_MGR:'팀장급', MID_MGR:'중간관리자', STAFF:'실무자', OTHER:'기타' },
+        companySize: { STARTUP:'스타트업', SMALL:'소', SME:'중소', MID:'중견', LARGE:'대', PUBLIC:'공공', UNKNOWN:'미상' },
+        monitoringStatus: { USING_WHATAP:'와탭 사용중', USING_OTHER:'타사 사용중', NOT_USING:'미사용' },
+        planWithinYear: { A_OPEN:'신규 오픈', B_EXPAND:'확장', C_REPLACE:'교체', D_NEW_ADOPT:'신규 도입' },
+        consultationPreference: { ONSITE_MEETING:'대면 미팅', EMAIL_OR_PHONE:'메일/전화' },
+        adoptionBlocker: { COST:'비용', INTERNAL_PERSUASION:'내부 설득', TECH_BURDEN:'기술 부담',
+                           EFFECT_UNCERTAIN:'효과 불확실', NOT_PRIORITY:'우선순위 낮음' }
+    };
+    function loc(category, v) { return (LABELS[category] && LABELS[category][v]) || v; }
+    function locMap(category, obj) {
+        if (!obj) return {};
+        const out = {};
+        for (const [k, v] of Object.entries(obj)) out[loc(category, k)] = v;
+        return out;
+    }
+
     const charts = {};
     function evtCode() { return document.getElementById('event-filter').value; }
     function param()   { const ec = evtCode(); return ec ? '?eventCode=' + encodeURIComponent(ec) : ''; }
 
-    function renderChart(id, type, labels, values, title) {
+    function renderChart(id, type, labels, values, options={}) {
         if (charts[id]) charts[id].destroy();
-        const ctx = document.getElementById(id).getContext('2d');
+        const ctx = document.getElementById(id);
+        if (!ctx) return;
+        const bg = options.colors || labels.map((_, i) => PALETTE[i % PALETTE.length]);
         charts[id] = new Chart(ctx, {
             type,
-            data: { labels, datasets: [{
-                label: title,
-                data: values,
-                backgroundColor: ['#2563eb','#16a34a','#dc2626','#f59e0b','#8b5cf6','#06b6d4','#64748b','#e11d48','#0891b2','#a855f7']
-            }]},
-            options: { responsive: true, maintainAspectRatio: true,
-                       plugins: { legend: { display: type !== 'bar' } } }
+            data: { labels, datasets: [{ label: options.label || '', data: values,
+                    backgroundColor: bg, borderColor: bg, borderWidth: 1 }] },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                indexAxis: options.horizontal ? 'y' : 'x',
+                plugins: {
+                    legend: { display: type === 'doughnut' || type === 'pie' },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: type === 'doughnut' || type === 'pie' ? {} : {
+                    x: { grid: { display: !options.horizontal } },
+                    y: { grid: { display:  options.horizontal }, beginAtZero: true }
+                }
+            }
         });
     }
 
+    // ───────── KPI ─────────
     async function loadSummary() {
         const s = await adminApi.get('/api/admin/dashboard/summary' + param());
+        const validPct = Math.round((s.validEmailRatio ?? 0) * 100);
         document.getElementById('summary-cards').innerHTML = `
-            <div class="dashboard-card"><div class="label">총 리드</div><div class="value">${s.leadCount ?? 0}</div></div>
-            <div class="dashboard-card"><div class="label">추첨</div><div class="value">${s.drawCount ?? 0}</div></div>
-            <div class="dashboard-card"><div class="label">상담 희망</div><div class="value">${s.wantsConsultationCount ?? 0}</div></div>
-            <div class="dashboard-card"><div class="label">유효 메일 비율</div><div class="value">${Math.round((s.validEmailRatio ?? 0) * 100)}%</div></div>
-            <div class="dashboard-card"><div class="label">거부 이메일</div><div class="value">${s.emailRejectionCount ?? 0}</div></div>`;
+            <button class="kpi-card kpi-total"  onclick="goLeads()">
+                <span class="kpi-label">총 리드</span>
+                <span class="kpi-value">${s.leadCount ?? 0}</span></button>
+            <div class="kpi-card kpi-B">
+                <span class="kpi-label">추첨</span>
+                <span class="kpi-value">${s.drawCount ?? 0}</span></div>
+            <div class="kpi-card kpi-consult">
+                <span class="kpi-label">상담 희망</span>
+                <span class="kpi-value">${s.wantsConsultationCount ?? 0}</span></div>
+            <div class="kpi-card kpi-A">
+                <span class="kpi-label">유효 메일 비율</span>
+                <span class="kpi-value">${validPct}%</span></div>
+            <div class="kpi-card kpi-pending">
+                <span class="kpi-label">거부된 메일</span>
+                <span class="kpi-value">${s.emailRejectionCount ?? 0}</span></div>`;
     }
-    async function loadSegments() {
-        const seg = await adminApi.get('/api/admin/dashboard/segments' + param());
-        renderChart('industry-chart', 'bar',      Object.keys(seg.industry || {}), Object.values(seg.industry || {}), '산업');
-        renderChart('joblevel-chart', 'doughnut', Object.keys(seg.jobLevel || {}), Object.values(seg.jobLevel || {}), '직급');
+    function goLeads() {
+        const ec = evtCode();
+        location.href = '/admin/leads' + (ec ? '?eventCode=' + encodeURIComponent(ec) : '');
     }
-    async function loadIntent() {
-        const intent = await adminApi.get('/api/admin/dashboard/intent' + param());
-        renderChart('interest-chart', 'bar',      Object.keys(intent.interestProducts || {}), Object.values(intent.interestProducts || {}), '관심 제품');
-        renderChart('plan-chart',     'doughnut', Object.keys(intent.planWithinYear   || {}), Object.values(intent.planWithinYear   || {}), '1년 내 계획');
+
+    // ───────── Timeline ─────────
+    let timelineRangeDays = 0; // 0 = all
+    function setTimelineRange(days) {
+        timelineRangeDays = days;
+        document.querySelectorAll('[data-range]').forEach(b => {
+            b.classList.toggle('btn-primary',   b.dataset.range == days);
+            b.classList.toggle('btn-secondary', b.dataset.range != days);
+        });
+        loadTimeline();
     }
-    async function loadMonitoring() {
-        const m = await adminApi.get('/api/admin/dashboard/monitoring' + param());
-        document.getElementById('monitoring-data').textContent = JSON.stringify(m, null, 2);
+    async function loadTimeline() {
+        const params = new URLSearchParams();
+        if (timelineRangeDays > 0) {
+            const to = new Date();
+            const from = new Date(); from.setDate(from.getDate() - (timelineRangeDays - 1));
+            params.set('from', from.toISOString().slice(0,10));
+            params.set('to',   to.toISOString().slice(0,10));
+        }
+        const data = await adminApi.get('/api/admin/dashboard/timeline' + (params.toString() ? '?' + params : ''));
+        const series = data.series || [];
+        const tlEmpty = document.getElementById('timeline-empty');
+        if (series.length === 0) {
+            if (charts.timeline) { charts.timeline.destroy(); charts.timeline = null; }
+            tlEmpty.style.display = '';
+            return;
+        }
+        tlEmpty.style.display = 'none';
+        const labels   = series.map(d => d.date);
+        const submitted= series.map(d => d.submitted);
+        const drawn    = series.map(d => d.drawn);
+        const consult  = series.map(d => d.consultations);
+
+        if (charts.timeline) charts.timeline.destroy();
+        charts.timeline = new Chart(document.getElementById('timeline-chart'), {
+            type: 'line',
+            data: { labels, datasets: [
+                { label:'제출',  data:submitted, borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,0.12)', fill:true, tension:.3 },
+                { label:'추첨',  data:drawn,     borderColor:'#16a34a', backgroundColor:'rgba(22,163,74,0.12)', fill:true, tension:.3 },
+                { label:'상담희망', data:consult, borderColor:'#db2777', backgroundColor:'rgba(219,39,119,0.12)', fill:true, tension:.3 }
+            ]},
+            options: { responsive:true, maintainAspectRatio:false,
+                plugins: { legend:{ position:'top' }, tooltip:{ mode:'index', intersect:false } },
+                interaction: { mode:'nearest', axis:'x', intersect:false },
+                scales: { y: { beginAtZero:true } }
+            }
+        });
     }
+
+    // ───────── Stage 분포 ─────────
     async function loadGradeDist() {
         const ec = evtCode();
         const url = '/api/admin/leads?size=500' + (ec ? '&eventCode=' + encodeURIComponent(ec) : '');
         const list = await adminApi.get(url);
-        const dist = { A: 0, B: 0, C: 0, PENDING: 0 };
+        const dist = { A:0, B:0, C:0, PENDING:0 };
         for (const l of (list.content || [])) {
             if (l.grade) dist[l.grade] = (dist[l.grade] || 0) + 1;
             else dist.PENDING++;
         }
-        renderChart('grade-chart', 'bar', Object.keys(dist), Object.values(dist), 'Lifecycle Stage 분포');
+        const labels = ['A','B','C','분석중'];
+        const values = [dist.A, dist.B, dist.C, dist.PENDING];
+        renderChart('grade-chart', 'bar', labels, values,
+            { colors: [STAGE_COLORS.A, STAGE_COLORS.B, STAGE_COLORS.C, STAGE_COLORS.PENDING] });
+        const total = values.reduce((a,b)=>a+b,0);
+        document.getElementById('grade-summary').innerHTML =
+            total === 0 ? '리드 없음' :
+            `A(<strong>${dist.A}</strong>) · B(<strong>${dist.B}</strong>) · C(<strong>${dist.C}</strong>) · 분석중(<strong>${dist.PENDING}</strong>) — 총 ${total}건`;
     }
 
+    // ───────── Segments (+ monitoringStatus 도 함께 렌더) ─────────
+    async function loadSegments() {
+        const seg = await adminApi.get('/api/admin/dashboard/segments' + param());
+        const indL = locMap('industry',    seg.industry);
+        const jl   = locMap('jobLevel',    seg.jobLevel);
+        const jf   = locMap('jobFunction', seg.jobFunction);
+        const cs   = locMap('companySize', seg.companySize);
+        const ms   = locMap('monitoringStatus', seg.monitoringStatus);
+        renderChart('industry-chart',    'bar',      Object.keys(indL), Object.values(indL), { horizontal:true });
+        renderChart('joblevel-chart',    'doughnut', Object.keys(jl),   Object.values(jl));
+        renderChart('jobfunction-chart', 'bar',      Object.keys(jf),   Object.values(jf), { horizontal:true });
+        renderChart('companysize-chart', 'doughnut', Object.keys(cs),   Object.values(cs));
+        renderChart('monstatus-chart',   'doughnut', Object.keys(ms),   Object.values(ms));
+    }
+
+    // ───────── Intent ─────────
+    async function loadIntent() {
+        const intent = await adminApi.get('/api/admin/dashboard/intent' + param());
+        const ip = intent.interestProducts || {};
+        const pl = locMap('planWithinYear', intent.planWithinYear);
+        const ab = locMap('adoptionBlocker', intent.adoptionBlocker);
+        const cp = locMap('consultationPreference', intent.consultationPreference);
+        renderChart('interest-chart', 'bar',      Object.keys(ip), Object.values(ip), { horizontal:true });
+        renderChart('plan-chart',     'doughnut', Object.keys(pl), Object.values(pl));
+        renderChart('blocker-chart',  'bar',      Object.keys(ab), Object.values(ab), { horizontal:true });
+        renderChart('consult-chart',  'doughnut', Object.keys(cp), Object.values(cp));
+        const cpTotal = Object.values(cp).reduce((a,b)=>a+b,0);
+        document.getElementById('consult-summary').textContent = cpTotal === 0
+            ? '상담 희망 응답 없음'
+            : `상담 희망 ${cpTotal}건 (전체 리드 중 일부)`;
+    }
+
+    // ───────── Monitoring usage (4 charts) ─────────
+    async function loadMonitoringUsage() {
+        const m = await adminApi.get('/api/admin/dashboard/monitoring' + param());
+        renderChart('commercial-chart',  'bar',      Object.keys(m.commercialProductUsage || {}), Object.values(m.commercialProductUsage || {}), { horizontal:true });
+        renderChart('opensource-chart',  'bar',      Object.keys(m.openSourceUsage      || {}), Object.values(m.openSourceUsage      || {}), { horizontal:true });
+        renderChart('satisfaction-chart','doughnut', Object.keys(m.commercialSatisfaction || {}), Object.values(m.commercialSatisfaction || {}));
+        renderChart('switch-chart',      'bar',      Object.keys(m.switchReasons        || {}), Object.values(m.switchReasons || {}), { horizontal:true });
+    }
+
+    // ───────── Prizes ─────────
+    async function loadPrizes() {
+        const ec = evtCode();
+        const listEl = document.getElementById('prize-list');
+        const emptyEl = document.getElementById('prize-empty');
+        if (!ec) {
+            emptyEl.style.display = ''; listEl.innerHTML = '';
+            document.getElementById('prize-meta').textContent = '';
+            return;
+        }
+        emptyEl.style.display = 'none';
+        const r = await adminApi.get('/api/admin/dashboard/prizes?eventCode=' + encodeURIComponent(ec));
+        const prizes = r.prizes || [];
+        if (prizes.length === 0) {
+            listEl.innerHTML = '<p class="muted" style="text-align:center; padding:16px 0;">등록된 경품이 없습니다.</p>';
+            document.getElementById('prize-meta').textContent = '';
+            return;
+        }
+        const totalInit = prizes.reduce((a,b)=>a+b.initial, 0);
+        const totalRem  = prizes.reduce((a,b)=>a+b.remaining, 0);
+        const totalAwd  = totalInit - totalRem;
+        document.getElementById('prize-meta').innerHTML =
+            `당첨 <strong>${totalAwd}</strong> / 총 <strong>${totalInit}</strong>` +
+            (r.outOfStockCount ? ` · 재고 부족 시도 <strong style="color:var(--danger)">${r.outOfStockCount}</strong>` : '');
+        listEl.innerHTML = prizes.map(p => {
+            const awd = p.initial - p.remaining;
+            const pct = p.initial === 0 ? 0 : Math.round((awd / p.initial) * 100);
+            const cls = pct >= 90 ? 'danger' : pct >= 60 ? 'warn' : 'ok';
+            return `<div class="prize-row">
+                <div class="prize-row-head">
+                    <span class="prize-rank">${p.rank}등</span>
+                    <strong class="prize-name">${p.name}</strong>
+                    <span class="prize-stats">${awd} / ${p.initial} <span class="muted">(${pct}%)</span></span>
+                </div>
+                <div class="prize-bar"><div class="prize-bar-fill prize-bar-${cls}" style="width:${pct}%;"></div></div>
+            </div>`;
+        }).join('');
+    }
+
+    // ───────── WhaTap users ─────────
+    async function loadWhatap() {
+        const r = await adminApi.get('/api/admin/dashboard/whatap-users' + param());
+        const dist = r.proficiencyDistribution || {};
+        const needed = r.neededHelps || {};
+        const total = Object.values(dist).reduce((a,b)=>a+b,0);
+        document.getElementById('whatap-empty').style.display = total === 0 ? '' : 'none';
+        document.getElementById('whatap-meta').textContent = total === 0
+            ? '응답 없음'
+            : `${total}명 응답 · 평균 ${r.proficiencyAvg ?? '-'}/10`;
+        if (total > 0) {
+            const labels = Array.from({length:10}, (_,i)=>String(i+1));
+            const values = labels.map(l => dist[l] || 0);
+            renderChart('proficiency-chart', 'bar', labels, values, { colors: labels.map((_,i)=>PALETTE[i % PALETTE.length]) });
+            renderChart('needed-chart', 'bar', Object.keys(needed), Object.values(needed), { horizontal:true });
+        } else {
+            if (charts['proficiency-chart']) { charts['proficiency-chart'].destroy(); delete charts['proficiency-chart']; }
+            if (charts['needed-chart'])      { charts['needed-chart'].destroy();      delete charts['needed-chart']; }
+        }
+    }
+
+    // ───────── 일괄 로드 ─────────
     async function loadAll() {
-        try { await loadSummary(); }    catch (e) { toast(e.message, true); }
-        try { await loadSegments(); }   catch (e) {}
-        try { await loadIntent(); }     catch (e) {}
-        try { await loadMonitoring(); } catch (e) {}
-        try { await loadGradeDist(); }  catch (e) {}
+        document.getElementById('dashboard-stale').textContent = '로딩 중...';
+        const start = Date.now();
+        await Promise.allSettled([
+            loadSummary(), loadTimeline(), loadGradeDist(),
+            loadSegments(), loadIntent(), loadMonitoringUsage(),
+            loadPrizes(), loadWhatap()
+        ]);
+        const ms = Date.now() - start;
+        document.getElementById('dashboard-stale').textContent =
+            `마지막 업데이트 ${new Date().toLocaleTimeString()} (${ms}ms)`;
     }
 
+    // ───────── CSV 내보내기 ─────────
     async function exportSummary()    { try { await adminApi.download('/api/admin/dashboard/export/summary.csv'    + param()); } catch(e){ toast(e.message,true);} }
     async function exportSegments()   { try { await adminApi.download('/api/admin/dashboard/export/segments.csv'   + param()); } catch(e){ toast(e.message,true);} }
     async function exportMonitoring() { try { await adminApi.download('/api/admin/dashboard/export/monitoring.csv' + param()); } catch(e){ toast(e.message,true);} }
     async function exportIntent()     { try { await adminApi.download('/api/admin/dashboard/export/intent.csv'     + param()); } catch(e){ toast(e.message,true);} }
+    async function exportTimeline()   { try { await adminApi.download('/api/admin/dashboard/export/timeline.csv'); } catch(e){ toast(e.message,true);} }
 
+    // ───────── AI 인사이트 ─────────
     async function generateInsight() {
         const btn = document.getElementById('insight-btn');
         const content = document.getElementById('insight-content');
         const meta = document.getElementById('insight-meta');
         btn.disabled = true; btn.textContent = '생성 중...';
         content.textContent = '...';
+        document.getElementById('sec-insight').scrollIntoView({ behavior:'smooth', block:'start' });
         try {
             const r = await adminApi.post('/api/admin/dashboard/insights' + param());
             content.textContent = r.insight || '(빈 응답)';
-            meta.textContent = `backend: ${r.backend} | model: ${r.model} | ${new Date(r.generatedAt).toLocaleString()}`;
+            meta.textContent = `backend: ${r.backend} · model: ${r.model} · ${new Date(r.generatedAt).toLocaleString()}`;
             toast('인사이트 생성 완료');
         } catch (e) {
             content.textContent = '생성 실패: ' + e.message
