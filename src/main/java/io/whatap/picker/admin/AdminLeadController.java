@@ -21,7 +21,6 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -184,38 +183,41 @@ public class AdminLeadController {
         return Map.of("deleted", count);
     }
 
+    /**
+     * 어드민용 리드 CSV 내보내기.
+     *
+     * <p>StreamingResponseBody 를 쓰지 않고 메모리에 빌드 후 byte[] 반환 — 어드민 리드 규모
+     * (수백~수천 건)에서는 메모리 부담이 작고, async/transaction 컨텍스트 손실로 인한
+     * {@code ERR_INCOMPLETE_CHUNKED_ENCODING} 가능성을 차단.
+     */
     @GetMapping("/export.csv")
-    public ResponseEntity<StreamingResponseBody> exportCsv(
-            @RequestParam(required = false) String eventCode) {
-
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
+    public ResponseEntity<byte[]> exportCsv(@RequestParam(required = false) String eventCode) {
         Event filterEvent = (eventCode != null && !eventCode.isBlank())
                 ? eventRepository.findByEventCode(eventCode).orElse(null)
                 : null;
 
-        StreamingResponseBody body = out -> {
-            try (CsvWriter csv = new CsvWriter(out)) {
-                csv.writeRow(HEADERS);
-                List<Lead> leads = filterEvent != null
-                        ? leadRepository.findAll().stream()
-                            .filter(l -> l.getEventId().equals(filterEvent.getId()))
-                            .toList()
-                        : leadRepository.findAll();
-
-                for (Lead lead : leads) {
-                    Event ev = eventRepository.findById(lead.getEventId()).orElse(null);
-                    DrawHistory draw = drawHistoryRepository
-                            .findByLeadIdAndEventId(lead.getId(), lead.getEventId()).orElse(null);
-                    csv.writeRow(buildRow(lead, ev, draw));
-                }
-                csv.flush();
+        java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream(64 * 1024);
+        try (CsvWriter csv = new CsvWriter(buf)) {
+            csv.writeRow(HEADERS);
+            List<Lead> leads = filterEvent != null
+                    ? leadRepository.findAll().stream()
+                        .filter(l -> l.getEventId().equals(filterEvent.getId()))
+                        .toList()
+                    : leadRepository.findAll();
+            for (Lead lead : leads) {
+                Event ev = eventRepository.findById(lead.getEventId()).orElse(null);
+                DrawHistory draw = drawHistoryRepository
+                        .findByLeadIdAndEventId(lead.getId(), lead.getEventId()).orElse(null);
+                csv.writeRow(buildRow(lead, ev, draw));
             }
-        };
+        }
 
         String filename = "leads_" + OffsetDateTime.now().toLocalDate() + ".csv";
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .contentType(MediaType.parseMediaType("text/csv;charset=UTF-8"))
-                .body(body);
+                .body(buf.toByteArray());
     }
 
     // ----------------------------------------------------------------
