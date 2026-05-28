@@ -33,7 +33,13 @@
                 </td>
                 <td><a class="btn btn-secondary" th:href="@{|/admin/events/${e.id}/prizes|}">재고</a></td>
                 <td><a class="btn btn-secondary" th:href="@{|/event/${e.eventCode}/qr|}" target="_blank">QR</a></td>
-                <td><a class="btn btn-secondary" th:href="@{|/survey/${e.eventCode}|}" target="_blank">설문</a></td>
+                <td>
+                    <a th:if="${e.status.name() == 'OPEN'}"
+                       class="btn btn-secondary"
+                       th:href="@{|/survey/${e.eventCode}|}" target="_blank">설문</a>
+                    <span th:unless="${e.status.name() == 'OPEN'}"
+                          class="muted" th:title="${e.status} + ' 상태 — OPEN으로 변경하면 설문 공개'">설문 비공개</span>
+                </td>
                 <td>
                     <button class="btn btn-secondary" onclick="regenerateQr(this)">QR 재생성</button>
                     <button class="btn btn-danger" onclick="deleteEvent(this)">삭제</button>
@@ -64,13 +70,8 @@
                 <label>행사 종료일 (선택)</label>
                 <input name="endDate" type="date">
             </div>
-            <div class="form-row">
-                <label>상태</label>
-                <select name="status">
-                    <option value="DRAFT" selected>DRAFT</option>
-                    <option value="OPEN">OPEN (즉시 공개)</option>
-                </select>
-            </div>
+            <p class="muted">생성 시 자동으로 <strong>OPEN</strong> 상태가 되어 즉시 설문이 공개됩니다.<br>
+                나중에 비공개하려면 목록의 상태 드롭다운에서 변경하세요.</p>
             <div class="form-actions">
                 <button type="button" class="btn btn-secondary" onclick="closeCreateModal()">취소</button>
                 <button type="submit" class="btn btn-primary">생성</button>
@@ -90,7 +91,7 @@
             label: f.label.value,
             eventDate: f.eventDate.value,
             endDate: f.endDate.value || null,
-            status: f.status.value
+            status: 'OPEN'
         };
         try {
             await adminApi.post('/api/admin/events', body);
