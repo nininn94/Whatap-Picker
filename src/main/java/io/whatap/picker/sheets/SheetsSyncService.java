@@ -9,7 +9,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
@@ -52,10 +51,13 @@ public class SheetsSyncService {
      * AFTER_COMMIT 시점에 실행 — Lead 가 DB 에 commit 된 후에야 호출되므로
      * findById 가 누락되는 race condition 차단. (이전엔 @EventListener 가 publish 즉시
      * 별도 스레드에서 돌아 commit 전에 leadRepository.findById 가 null 반환 → silent skip)
+     *
+     * <p>주의: @TransactionalEventListener 와 같은 메서드에 @Transactional 을 직접 붙이면
+     * Spring 이 거부함 (REQUIRES_NEW 가 아니면). 내부 syncOne 의 repo 호출이 자체 트랜잭션
+     * 처리하므로 외부 트랜잭션 불필요.
      */
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    @Transactional(readOnly = true)
     public void onLeadSubmitted(LeadSubmittedEvent ev) {
         try { syncOne(ev.leadId(), ev.eventId()); }
         catch (Exception e) { log.warn("Sheets sync 실패 leadId={}: {}", ev.leadId(), e.toString(), e); }
