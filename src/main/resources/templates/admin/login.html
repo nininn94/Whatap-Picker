@@ -1,24 +1,23 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{admin/layout :: head(title='어드민 로그인')}"></head>
-<body>
-<main class="admin-container" style="max-width: 400px; margin-top: 80px;">
+<body class="login-shell">
+<main>
     <div class="card">
-        <h1>WhaTap Picker 관리자</h1>
-        <p class="muted">관리자 계정으로 로그인하세요.</p>
+        <div class="brand-mark">WhaTap Picker</div>
+        <h1 style="margin:0 0 4px; font-size:1.25rem;">관리자 로그인</h1>
+        <p class="muted" style="margin-top:0;">관리자 / 운영자 계정으로 로그인하세요.</p>
 
-        <form id="login-form" onsubmit="return submitLogin(event)" style="display:flex; flex-direction:column; gap:12px;">
-            <label>
-                <span style="display:block; font-weight:600; margin-bottom:4px;">아이디(ID)</span>
-                <input type="text" name="username" required autocomplete="username"
-                       style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:6px;">
+        <form id="login-form" onsubmit="return submitLogin(event)" style="display:flex; flex-direction:column; gap:14px; margin-top:18px;">
+            <label style="display:flex; flex-direction:column; gap:4px;">
+                <span style="font-weight:600;">아이디(ID)</span>
+                <input type="text" name="username" required autocomplete="username" style="width:100%;">
             </label>
-            <label>
-                <span style="display:block; font-weight:600; margin-bottom:4px;">비밀번호</span>
-                <input type="password" name="password" required autocomplete="current-password"
-                       style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:6px;">
+            <label style="display:flex; flex-direction:column; gap:4px;">
+                <span style="font-weight:600;">비밀번호</span>
+                <input type="password" name="password" required autocomplete="current-password" style="width:100%;">
             </label>
-            <button type="submit" class="btn btn-primary">로그인</button>
+            <button type="submit" class="btn btn-primary btn-lg">로그인</button>
             <p id="login-error" class="error" style="display:none;"></p>
         </form>
     </div>
@@ -27,10 +26,7 @@
     async function submitLogin(e) {
         e.preventDefault();
         const form = e.target;
-        const data = {
-            username: form.username.value,
-            password: form.password.value
-        };
+        const data = { username: form.username.value, password: form.password.value };
         const err = document.getElementById('login-error');
         err.style.display = 'none';
         try {
@@ -47,11 +43,9 @@
                 return false;
             }
             const json = await res.json();
-            // 헤더 인증을 위한 보조 저장 (어드민 페이지 fetch 호출에서 사용)
             localStorage.setItem('jwt', json.accessToken);
             const params = new URLSearchParams(window.location.search);
-            const next = params.get('next') || '/admin';
-            window.location.href = next;
+            window.location.href = params.get('next') || '/admin';
             return false;
         } catch (ex) {
             err.textContent = '네트워크 오류';

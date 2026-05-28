@@ -1,6 +1,7 @@
 package io.whatap.picker.admin;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.whatap.picker.admin.dashboard.MarketingInsightService;
 import io.whatap.picker.ai.LeadScoreRepository;
 import io.whatap.picker.ai.enums.Grade;
 import io.whatap.picker.csv.CsvWriter;
@@ -42,27 +43,36 @@ public class AdminLeadController {
     private final EventRepository eventRepository;
     private final DrawHistoryRepository drawHistoryRepository;
     private final LeadScoreRepository leadScoreRepository;
+    private final MarketingInsightService insightService;
     private final ObjectMapper objectMapper;
 
     public AdminLeadController(LeadRepository leadRepository,
                                EventRepository eventRepository,
                                DrawHistoryRepository drawHistoryRepository,
                                LeadScoreRepository leadScoreRepository,
+                               MarketingInsightService insightService,
                                ObjectMapper objectMapper) {
         this.leadRepository = leadRepository;
         this.eventRepository = eventRepository;
         this.drawHistoryRepository = drawHistoryRepository;
         this.leadScoreRepository = leadScoreRepository;
+        this.insightService = insightService;
         this.objectMapper = objectMapper;
     }
 
     @GetMapping
     public Map<String, Object> list(@RequestParam(required = false) String eventCode,
                                     @RequestParam(required = false) Industry industry,
+                                    @RequestParam(required = false) JobFunction jobFunction,
                                     @RequestParam(required = false) JobLevel jobLevel,
+                                    @RequestParam(required = false) CompanySize companySize,
+                                    @RequestParam(required = false) EmployeeCountRange employeeCountRange,
                                     @RequestParam(required = false) MonitoringStatus monitoringStatus,
                                     @RequestParam(required = false) PlanWithinYear planWithinYear,
+                                    @RequestParam(required = false) ConsultationPreference consultationPreference,
+                                    @RequestParam(required = false) AdoptionBlocker adoptionBlocker,
                                     @RequestParam(required = false) Grade grade,
+                                    @RequestParam(required = false) String q,
                                     @RequestParam(defaultValue = "0") int page,
                                     @RequestParam(defaultValue = "50") int size) {
 
@@ -76,9 +86,15 @@ public class AdminLeadController {
         Specification<Lead> spec = Specification.allOf(
                 LeadSpecifications.eventId(eventId),
                 LeadSpecifications.industry(industry),
+                LeadSpecifications.jobFunction(jobFunction),
                 LeadSpecifications.jobLevel(jobLevel),
+                LeadSpecifications.companySize(companySize),
+                LeadSpecifications.employeeCountRange(employeeCountRange),
                 LeadSpecifications.monitoringStatus(monitoringStatus),
-                LeadSpecifications.planWithinYear(planWithinYear)
+                LeadSpecifications.planWithinYear(planWithinYear),
+                LeadSpecifications.consultationPreference(consultationPreference),
+                LeadSpecifications.adoptionBlocker(adoptionBlocker),
+                LeadSpecifications.keyword(q)
         );
         Page<Lead> result = leadRepository.findAll(spec, PageRequest.of(page, size));
 
@@ -133,6 +149,31 @@ public class AdminLeadController {
                         "drawnAt", h.getDrawnAt()))
                 .orElse(null));
         return view;
+    }
+
+    /**
+     * 현재 보고 있는 필터된 결과에 대한 AI 인사이트.
+     * Body로 list() 응답(총건수+세그먼트 집계)을 그대로 받아 LLM 에 전달.
+     * LLM 사용 불가 시 RuntimeException → 400.
+     */
+    @PostMapping("/insights")
+    public Map<String, Object> insightsForFilter(@RequestBody InsightRequest req) {
+        java.util.LinkedHashMap<String, Object> stats = new java.util.LinkedHashMap<>();
+        if (req.filters != null) stats.put("적용 필터", req.filters);
+        stats.put("총 리드 수", req.totalElements);
+        if (req.gradeDistribution != null && !req.gradeDistribution.isEmpty())
+            stats.put("AI 등급 분포", req.gradeDistribution);
+        if (req.segmentCounts != null) req.segmentCounts.forEach(stats::put);
+        return insightService.generateForFiltered(
+                req.label == null ? "필터된 리드" : req.label, stats);
+    }
+
+    public static class InsightRequest {
+        public String label;
+        public Map<String, Object> filters;
+        public Long totalElements;
+        public Map<String, Long> gradeDistribution;
+        public Map<String, Map<String, Long>> segmentCounts;
     }
 
     @DeleteMapping("/expired")
@@ -223,7 +264,6 @@ public class AdminLeadController {
     }
 
     private Map<String, Object> toListView(Lead l) {
-        // Map.of 는 null value 불가 — null 가능 필드는 HashMap 사용
         java.util.LinkedHashMap<String, Object> m = new java.util.LinkedHashMap<>();
         m.put("id", l.getId());
         m.put("eventId", l.getEventId());
@@ -234,10 +274,46 @@ public class AdminLeadController {
         m.put("industry", l.getIndustry());
         m.put("jobFunction", l.getJobFunction());
         m.put("jobLevel", l.getJobLevel());
+        m.put("companySize", l.getCompanySize());
+        m.put("employeeCountRange", l.getEmployeeCountRange());
         m.put("monitoringStatus", l.getMonitoringStatus());
+        m.put("adoptionBlocker", l.getAdoptionBlocker());
         m.put("planWithinYear", l.getPlanWithinYear());
         m.put("consultationPreference", l.getConsultationPreference());
         m.put("interestProducts", l.getInterestProducts());
+
+        // surveyPayload 핵심 필드 평탄화 — 화면 컬럼/필터에 직접 사용 가능하도록
+        var payload = l.getSurveyPayload();
+        if (payload != null) {
+            if (payload.whatap() != null) {
+                m.put("whatapProficiency", payload.whatap().proficiency());
+                m.put("whatapNeededHelps", payload.whatap().neededHelps());
+            }
+            if (payload.other() != null) {
+                m.put("commercialProducts", payload.other().commercialProducts());
+                m.put("openSourceProducts", payload.other().openSourceProducts());
+                if (payload.other().commercial() != null) {
+                    var c = payload.other().commercial();
+                    m.put("commercialDeployment",   c.deployment());
+                    m.put("commercialSatisfaction", c.satisfaction());
+                    m.put("commercialComplaints",   c.complaints());
+                    m.put("annualBudget",           c.annualBudget());
+                    m.put("costPerception",         c.costPerception());
+                    m.put("switchReason",           c.switchReason());
+                }
+                if (payload.other().openSource() != null) {
+                    var o = payload.other().openSource();
+                    m.put("openSourceDeployment",   o.deployment());
+                    m.put("openSourceSatisfaction", o.satisfaction());
+                    m.put("openSourceDifficulties", o.difficulties());
+                }
+            }
+            if (payload.notUsing() != null) {
+                m.put("notUsingConcerns",       payload.notUsing().concerns());
+                m.put("notUsingFrequentIssues", payload.notUsing().frequentIssues());
+            }
+        }
+
         m.put("createdAt", l.getCreatedAt());
         m.put("retentionUntil", l.getRetentionUntil());
         return m;

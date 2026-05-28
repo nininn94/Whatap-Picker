@@ -58,12 +58,13 @@ function toast(msg, isError = false) {
     if (!el) {
         el = document.createElement('div');
         el.id = 'toast';
-        el.style.cssText = 'position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;color:#fff;font-weight:600;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.15);transition:opacity 0.3s';
+        el.className = 'toast is-hidden';
         document.body.appendChild(el);
     }
-    el.style.background = isError ? '#dc2626' : '#16a34a';
+    el.classList.remove('toast-success', 'toast-error');
+    el.classList.add(isError ? 'toast-error' : 'toast-success');
     el.textContent = msg;
-    el.style.opacity = '1';
+    requestAnimationFrame(() => el.classList.remove('is-hidden'));
     clearTimeout(el._timer);
-    el._timer = setTimeout(() => { el.style.opacity = '0'; }, 3000);
+    el._timer = setTimeout(() => el.classList.add('is-hidden'), 3000);
 }

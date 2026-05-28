@@ -1,72 +1,228 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{admin/layout :: head(title='리드 조회')}"></head>
-<body>
-<nav th:replace="~{admin/layout :: nav}"></nav>
-<main class="admin-container">
-    <h1>리드 조회</h1>
-
-    <div class="card">
-        <div class="toolbar">
-            <select id="event-filter">
-                <option value="">전체 행사</option>
-                <option th:each="e : ${events}" th:value="${e.eventCode}" th:text="|${e.eventCode} - ${e.label}|"></option>
-            </select>
-            <select id="grade-filter">
-                <option value="">전체 등급</option>
-                <option value="A">A</option><option value="B">B</option><option value="C">C</option>
-            </select>
-            <button class="btn btn-secondary" onclick="loadLeads()">조회</button>
-            <button class="btn btn-secondary" onclick="loadPending()">대기/실패 확인</button>
-            <div class="spacer"></div>
-            <button class="btn btn-secondary" onclick="rescore()">일괄 재분석</button>
-            <button class="btn btn-danger"   onclick="deleteExpired()">만료 파기</button>
-            <button class="btn btn-primary"  onclick="downloadCsv()">CSV 다운로드</button>
+<body class="admin-body">
+<nav th:replace="~{admin/layout :: nav('leads')}"></nav>
+<main class="admin-container wide">
+    <header class="page-header">
+        <div class="title-block">
+            <p class="breadcrumb"><a th:href="@{/admin}">홈</a><span class="sep">›</span>리드</p>
+            <h1>리드 조회</h1>
+            <p class="subtitle">엑셀 표처럼 모든 설문 칼럼 확인 · 필터 · CSV · AI 인사이트.</p>
         </div>
-        <p id="pending-status" class="muted" style="margin:8px 0;"></p>
-        <div id="leads-table">불러오는 중...</div>
+    </header>
+
+    <!-- 필터 패널 -->
+    <div class="card">
+        <div class="card-header"><h2>필터</h2></div>
+        <div id="filter-grid" class="filter-grid">
+            <label>행사
+                <select id="f-eventCode">
+                    <option value="">전체</option>
+                    <option th:each="e : ${events}" th:value="${e.eventCode}" th:text="|${e.eventCode} - ${e.label}|"></option>
+                </select>
+            </label>
+            <label>키워드 (이름/이메일/휴대폰/회사)
+                <input id="f-q" type="text" placeholder="검색...">
+            </label>
+            <label>산업      <select id="f-industry"><option value="">전체</option></select></label>
+            <label>직무      <select id="f-jobFunction"><option value="">전체</option></select></label>
+            <label>직급      <select id="f-jobLevel"><option value="">전체</option></select></label>
+            <label>기업규모  <select id="f-companySize"><option value="">전체</option></select></label>
+            <label>직원수    <select id="f-employeeCountRange"><option value="">전체</option></select></label>
+            <label>모니터링  <select id="f-monitoringStatus"><option value="">전체</option></select></label>
+            <label>1년 계획  <select id="f-planWithinYear"><option value="">전체</option></select></label>
+            <label>상담 희망 <select id="f-consultationPreference"><option value="">전체</option></select></label>
+            <label>망설이는 이유 <select id="f-adoptionBlocker"><option value="">전체</option></select></label>
+            <label>AI 등급
+                <select id="f-grade">
+                    <option value="">전체</option>
+                    <option value="A">A</option><option value="B">B</option><option value="C">C</option>
+                </select>
+            </label>
+        </div>
+        <div class="toolbar" style="margin-top:14px;">
+            <button class="btn btn-sm btn-secondary" onclick="loadLeads()">조회</button>
+            <button class="btn btn-sm btn-ghost"     onclick="clearFilters()">필터 초기화</button>
+            <button class="btn btn-sm btn-ghost"     onclick="loadPending()">대기/실패 확인</button>
+            <div class="spacer"></div>
+            <button class="btn btn-sm btn-secondary" onclick="rescore()">일괄 재분석</button>
+            <button class="btn btn-sm btn-danger"    onclick="deleteExpired()">만료 파기</button>
+            <button class="btn btn-sm btn-primary"   onclick="downloadCsv()">CSV 다운로드</button>
+            <button class="btn btn-sm btn-primary"   onclick="generateInsight()">🤖 AI 인사이트</button>
+        </div>
+        <p id="pending-status" class="muted" style="margin:8px 0 0;"></p>
+    </div>
+
+    <!-- 인사이트 결과 -->
+    <div id="insight-card" class="card" style="display:none;">
+        <h2 style="margin:0 0 8px;">🤖 AI 인사이트</h2>
+        <p class="muted" id="insight-meta"></p>
+        <pre id="insight-content" style="background:#fafafa; padding:16px; border-radius:6px; white-space:pre-wrap; line-height:1.6; font-family:inherit;"></pre>
+    </div>
+
+    <!-- 리드 wide table -->
+    <div class="card">
+        <div class="card-header">
+            <h2>리드</h2>
+            <span class="muted">총 <strong id="lead-count">-</strong>건</span>
+        </div>
+        <div class="table-scroll">
+            <div id="leads-table" class="muted" style="padding:24px;">불러오는 중...</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center; margin-top:12px;">
+            <button class="btn btn-sm btn-secondary" id="prev-page" onclick="prevPage()" disabled>← 이전</button>
+            <span id="page-info" class="muted">-</span>
+            <button class="btn btn-sm btn-secondary" id="next-page" onclick="nextPage()" disabled>다음 →</button>
+        </div>
     </div>
 </main>
 
 <script>
-    async function loadLeads() {
-        const ec = document.getElementById('event-filter').value;
-        const grade = document.getElementById('grade-filter').value;
+    // ── enum 옵션 정의 ──
+    const ENUMS = {
+        industry: ['FINANCE_INSURANCE','EDUCATION_RESEARCH','IT_SERVICES','GOVT_PUBLIC','HEALTHCARE',
+                   'MANUFACTURING','RETAIL_ECOMMERCE','LOGISTICS','LIFE_SCIENCE','TELECOM',
+                   'MEDIA_ENTERTAINMENT','PROFESSIONAL_SERVICES','ENERGY_RESOURCES','HOTEL_TOURISM',
+                   'SERVICE_INDUSTRY','OTHER'],
+        jobFunction: ['DEVOPS','IT_OPS','SRE','DEVELOPER','R_AND_D','IT_PLANNING','SECURITY','CONSULTING',
+                      'DATA','INFRA','MARKETING_SALES','FINANCE_BACKOFFICE','EXECUTIVE','STUDENT_FREELANCER','OTHER'],
+        jobLevel: ['TOP_EXECUTIVE','SENIOR_MGR','MID_MGR','STAFF','OTHER'],
+        companySize: ['STARTUP','SMALL','SME','MID','LARGE','PUBLIC','UNKNOWN'],
+        employeeCountRange: ['R_1_50','R_51_200','R_201_500','R_501_1000','R_1001_5000','R_5001_PLUS'],
+        monitoringStatus: ['USING_WHATAP','USING_OTHER','NOT_USING'],
+        planWithinYear: ['A_OPEN','B_EXPAND','C_REPLACE','D_NEW_ADOPT'],
+        consultationPreference: ['ONSITE_MEETING','EMAIL_OR_PHONE'],
+        adoptionBlocker: ['COST','INTERNAL_PERSUASION','TECH_BURDEN','EFFECT_UNCERTAIN','NOT_PRIORITY']
+    };
+    Object.entries(ENUMS).forEach(([k, opts]) => {
+        const sel = document.getElementById('f-' + k);
+        opts.forEach(v => {
+            const o = document.createElement('option');
+            o.value = v; o.textContent = v;
+            sel.appendChild(o);
+        });
+    });
+
+    // ── 표시할 컬럼 정의 (key + 라벨) ──
+    const COLUMNS = [
+        ['name',         '이름'],
+        ['phone',        '휴대폰'],
+        ['email',        '이메일'],
+        ['company',      '회사'],
+        ['industry',     '산업'],
+        ['jobFunction',  '직무'],
+        ['jobLevel',     '직급'],
+        ['companySize',  '기업규모'],
+        ['employeeCountRange', '직원수'],
+        ['monitoringStatus',   '현재 모니터링'],
+        ['commercialProducts', '사용 상용툴'],
+        ['openSourceProducts', '사용 오픈소스'],
+        ['commercialDeployment',   '상용 운영방식'],
+        ['commercialSatisfaction', '상용 만족도'],
+        ['commercialComplaints',   '상용 불만'],
+        ['annualBudget',           '연간 예산'],
+        ['costPerception',         '비용 체감'],
+        ['switchReason',           '교체 이유'],
+        ['openSourceDeployment',   '오픈소스 운영'],
+        ['openSourceSatisfaction', '오픈소스 만족도'],
+        ['openSourceDifficulties', '오픈소스 어려움'],
+        ['notUsingConcerns',       '미사용 고민'],
+        ['notUsingFrequentIssues', '미사용 빈도문제'],
+        ['whatapProficiency',      '와탭 활용도'],
+        ['whatapNeededHelps',      '와탭 필요도움'],
+        ['adoptionBlocker', '망설이는 이유'],
+        ['interestProducts','관심 제품'],
+        ['planWithinYear',  '1년 계획'],
+        ['consultationPreference','상담'],
+        ['grade',        'AI 등급'],
+        ['score',        '점수'],
+        ['createdAt',    '제출']
+    ];
+
+    let currentPage = 0;
+    let totalPages = 0;
+    const PAGE_SIZE = 50;
+
+    function fmt(v) {
+        if (v == null || v === '') return '-';
+        if (Array.isArray(v)) return v.length ? v.join(', ') : '-';
+        if (typeof v === 'string' && v.length > 19 && v.includes('T'))
+            return new Date(v).toLocaleString();
+        return v;
+    }
+
+    function gradeCell(l) {
+        if (l.grade) return `<span class="grade-${l.grade}">${l.grade}</span>`;
+        if (l.aiStatus === 'PENDING') return '<span class="grade-PENDING">분석중</span>';
+        return '-';
+    }
+
+    function buildQuery() {
         const params = new URLSearchParams();
-        if (ec) params.set('eventCode', ec);
-        if (grade) params.set('grade', grade);
-        params.set('size', '100');
+        const keys = ['eventCode','q','industry','jobFunction','jobLevel','companySize',
+                      'employeeCountRange','monitoringStatus','planWithinYear',
+                      'consultationPreference','adoptionBlocker','grade'];
+        keys.forEach(k => {
+            const v = document.getElementById('f-' + k).value;
+            if (v) params.set(k, v);
+        });
+        params.set('size', PAGE_SIZE);
+        params.set('page', currentPage);
+        return params;
+    }
+
+    function currentFilters() {
+        const out = {};
+        const keys = ['eventCode','q','industry','jobFunction','jobLevel','companySize',
+                      'employeeCountRange','monitoringStatus','planWithinYear',
+                      'consultationPreference','adoptionBlocker','grade'];
+        keys.forEach(k => {
+            const v = document.getElementById('f-' + k).value;
+            if (v) out[k] = v;
+        });
+        return out;
+    }
+
+    async function loadLeads() {
         try {
+            const params = buildQuery();
             const data = await adminApi.get('/api/admin/leads?' + params);
-            const rows = (data.content || []).map(l => `
-                <tr>
-                    <td><a href="/admin/leads/${l.id}"><strong>${l.name || '-'}</strong></a></td>
-                    <td>${l.phone || '-'}</td>
-                    <td>${l.email || '-'}</td>
-                    <td>${l.company || '-'}</td>
-                    <td>${l.industry || '-'}</td>
-                    <td>${l.jobFunction || '-'}</td>
-                    <td>${l.jobLevel || '-'}</td>
-                    <td>${l.monitoringStatus || '-'}</td>
-                    <td>${l.planWithinYear || '-'}</td>
-                    <td>${l.consultationPreference === 'ONSITE_MEETING' ? '✅' : '-'}</td>
-                    <td>${l.grade ? `<span class="grade-${l.grade}">${l.grade}</span>` : (l.aiStatus === 'PENDING' ? '<span class="grade-PENDING">분석중</span>' : '-')}</td>
-                    <td>${l.createdAt ? new Date(l.createdAt).toLocaleString() : '-'}</td>
-                </tr>`).join('');
+            totalPages = data.totalPages || 0;
+            document.getElementById('lead-count').textContent = data.totalElements ?? 0;
+            document.getElementById('page-info').textContent =
+                (totalPages === 0) ? '0 / 0' : `${(data.page ?? 0) + 1} / ${totalPages}`;
+            document.getElementById('prev-page').disabled = (data.page ?? 0) <= 0;
+            document.getElementById('next-page').disabled = (data.page ?? 0) >= totalPages - 1;
+
+            const head = COLUMNS.map(([k, label]) => `<th style="white-space:nowrap;">${label}</th>`).join('');
+            const rows = (data.content || []).map(l => {
+                const cells = COLUMNS.map(([k]) => {
+                    if (k === 'name') return `<td><a href="/admin/leads/${l.id}"><strong>${fmt(l[k])}</strong></a></td>`;
+                    if (k === 'grade') return `<td>${gradeCell(l)}</td>`;
+                    return `<td style="white-space:nowrap;">${fmt(l[k])}</td>`;
+                }).join('');
+                return `<tr>${cells}</tr>`;
+            }).join('');
             document.getElementById('leads-table').innerHTML = `
-                <table>
-                    <thead><tr>
-                        <th>이름</th><th>휴대폰</th><th>이메일</th><th>회사</th>
-                        <th>산업</th><th>직무</th><th>직급</th>
-                        <th>현재 모니터링</th><th>1년 계획</th><th>상담</th>
-                        <th>AI</th><th>제출</th>
-                    </tr></thead>
-                    <tbody>${rows || '<tr><td colspan="12">데이터 없음</td></tr>'}</tbody>
-                </table>
-                <p class="muted">총 ${data.totalElements || 0}건</p>`;
+                <table style="min-width: 100%;">
+                    <thead><tr>${head}</tr></thead>
+                    <tbody>${rows || `<tr><td colspan="${COLUMNS.length}" class="muted" style="text-align:center; padding:24px 0;">데이터 없음</td></tr>`}</tbody>
+                </table>`;
         } catch (e) {
-            document.getElementById('leads-table').innerHTML = '<p>로드 실패: ' + e.message + '</p>';
+            document.getElementById('leads-table').innerHTML = '<p class="error" style="padding:16px;">로드 실패: ' + e.message + '</p>';
         }
+    }
+
+    function prevPage() { if (currentPage > 0) { currentPage--; loadLeads(); } }
+    function nextPage() { if (currentPage < totalPages - 1) { currentPage++; loadLeads(); } }
+
+    function clearFilters() {
+        ['eventCode','q','industry','jobFunction','jobLevel','companySize',
+         'employeeCountRange','monitoringStatus','planWithinYear',
+         'consultationPreference','adoptionBlocker','grade']
+            .forEach(k => { document.getElementById('f-' + k).value = ''; });
+        currentPage = 0; loadLeads();
     }
 
     async function loadPending() {
@@ -78,8 +234,8 @@
     }
 
     async function rescore() {
-        const ec = document.getElementById('event-filter').value;
-        if (!confirm('PENDING/FAILED 상태인 리드를 재분석 큐에 넣을까요?')) return;
+        const ec = document.getElementById('f-eventCode').value;
+        if (!confirm('PENDING/FAILED 리드를 재분석 큐에 넣을까요?')) return;
         try {
             const r = await adminApi.post('/api/admin/leads/rescore', { eventCode: ec || null });
             toast(`${r.queued}건 재분석 시작`);
@@ -88,7 +244,7 @@
     }
 
     async function deleteExpired() {
-        if (!confirm('보존 기간(2년) 만료된 리드를 모두 hard delete 합니다. 진행할까요?')) return;
+        if (!confirm('보존 기간(2년) 만료 리드를 모두 hard delete 합니다. 진행할까요?')) return;
         try {
             const r = await adminApi.del('/api/admin/leads/expired');
             toast(`${r.deleted}건 파기되었습니다.`);
@@ -97,18 +253,82 @@
     }
 
     async function downloadCsv() {
-        const ec = document.getElementById('event-filter').value;
-        const params = ec ? '?eventCode=' + encodeURIComponent(ec) : '';
+        const params = buildQuery();
+        params.delete('page'); params.delete('size');
         try {
-            await adminApi.download('/api/admin/leads/export.csv' + params);
+            await adminApi.download('/api/admin/leads/export.csv?' + params);
             toast('CSV 다운로드 시작');
         } catch (e) { toast(e.message, true); }
     }
 
-    document.getElementById('event-filter').addEventListener('change', loadLeads);
-    document.getElementById('grade-filter').addEventListener('change', loadLeads);
+    async function generateInsight() {
+        const filters = currentFilters();
+        // 현재 페이지 데이터로 간단한 세그먼트 집계 (모든 페이지 합산은 추가 호출 필요. 여기선 현재 필터 결과 메타만 던짐.)
+        try {
+            // 전체 결과(필터 적용)로 집계: size=500 호출
+            const params = buildQuery();
+            params.set('size', '500');
+            params.set('page', '0');
+            const all = await adminApi.get('/api/admin/leads?' + params);
+            const list = all.content || [];
+
+            const seg = {};
+            const groupBy = (key) => {
+                const m = {};
+                for (const l of list) {
+                    const v = l[key];
+                    if (v == null || v === '') continue;
+                    m[v] = (m[v] || 0) + 1;
+                }
+                return m;
+            };
+            seg['산업']         = groupBy('industry');
+            seg['직무']         = groupBy('jobFunction');
+            seg['직급']         = groupBy('jobLevel');
+            seg['기업규모']     = groupBy('companySize');
+            seg['모니터링상태'] = groupBy('monitoringStatus');
+            seg['1년 계획']     = groupBy('planWithinYear');
+            seg['상담희망']     = groupBy('consultationPreference');
+
+            const gradeDist = { A:0,B:0,C:0,PENDING:0 };
+            for (const l of list) {
+                if (l.grade) gradeDist[l.grade] = (gradeDist[l.grade] || 0) + 1;
+                else gradeDist.PENDING++;
+            }
+
+            document.getElementById('insight-card').style.display = '';
+            document.getElementById('insight-content').textContent = '...';
+            document.getElementById('insight-meta').textContent = '생성 중 (LLM 호출, 30초~1분)...';
+
+            const r = await adminApi.post('/api/admin/leads/insights', {
+                label: filters.eventCode ? `행사 ${filters.eventCode} 필터된 리드` : '필터된 리드',
+                filters,
+                totalElements: all.totalElements,
+                gradeDistribution: gradeDist,
+                segmentCounts: seg
+            });
+            document.getElementById('insight-content').textContent = r.insight || '(빈 응답)';
+            document.getElementById('insight-meta').textContent =
+                `backend: ${r.backend} | model: ${r.model} | ${new Date(r.generatedAt).toLocaleString()}`;
+            toast('인사이트 생성 완료');
+        } catch (e) {
+            document.getElementById('insight-content').textContent =
+                '생성 실패: ' + e.message + '\n\n/admin/settings 에서 Anthropic API 키 확인 필요.';
+            toast(e.message, true);
+        }
+    }
+
+    // 첫 로드
     loadLeads();
     loadPending();
+
+    // 키워드/필터 변경 시 즉시 조회 (옵션)
+    ['eventCode','industry','jobFunction','jobLevel','companySize','employeeCountRange',
+     'monitoringStatus','planWithinYear','consultationPreference','adoptionBlocker','grade']
+        .forEach(k => document.getElementById('f-' + k).addEventListener('change', () => { currentPage = 0; loadLeads(); }));
+    document.getElementById('f-q').addEventListener('keydown', e => {
+        if (e.key === 'Enter') { currentPage = 0; loadLeads(); }
+    });
 </script>
 <div th:replace="~{admin/layout :: scripts}"></div>
 </body>

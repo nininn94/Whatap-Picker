@@ -1,56 +1,74 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{admin/layout :: head(title='행사 관리')}"></head>
-<body>
-<nav th:replace="~{admin/layout :: nav}"></nav>
-<main class="admin-container">
-    <h1>행사 관리</h1>
+<body class="admin-body">
+<nav th:replace="~{admin/layout :: nav('events')}"></nav>
 
-    <div class="toolbar">
-        <button class="btn btn-primary" onclick="openCreateModal()">+ 행사 생성</button>
-    </div>
+<main class="admin-container">
+    <header class="page-header">
+        <div class="title-block">
+            <p class="breadcrumb"><a th:href="@{/admin}">홈</a><span class="sep">›</span>행사</p>
+            <h1>행사 관리</h1>
+            <p class="subtitle">행사를 만들고 상태를 토글하면 즉시 공개 설문이 열립니다. 각 행 액션으로 빠르게 이동하세요.</p>
+        </div>
+        <div class="actions">
+            <button class="btn btn-primary" onclick="openCreateModal()">+ 행사 생성</button>
+        </div>
+    </header>
 
     <div class="card">
-        <table id="events-table">
-            <thead>
-            <tr>
-                <th>코드</th><th>라벨</th><th>일자</th><th>상태</th>
-                <th>경품</th><th>QR</th><th>설문</th><th>액션</th>
-            </tr>
-            </thead>
-            <tbody>
-            <tr th:each="e : ${events}" th:attr="data-id=${e.id}, data-code=${e.eventCode}">
-                <td th:text="${e.eventCode}"></td>
-                <td th:text="${e.label}"></td>
-                <td th:text="${e.eventDate}"></td>
-                <td>
-                    <select onchange="changeStatus(this)">
-                        <option value="DRAFT"    th:selected="${e.status.name() == 'DRAFT'}">DRAFT</option>
-                        <option value="OPEN"     th:selected="${e.status.name() == 'OPEN'}">OPEN</option>
-                        <option value="CLOSED"   th:selected="${e.status.name() == 'CLOSED'}">CLOSED</option>
-                        <option value="ARCHIVED" th:selected="${e.status.name() == 'ARCHIVED'}">ARCHIVED</option>
-                    </select>
-                </td>
-                <td><a class="btn btn-secondary" th:href="@{|/admin/events/${e.id}/prizes|}">재고</a></td>
-                <td><a class="btn btn-secondary" th:href="@{|/event/${e.eventCode}/qr|}" target="_blank">QR</a></td>
-                <td>
-                    <a class="btn btn-secondary"
-                       th:href="@{|/admin/events/${e.id}/preview|}" target="_blank"
-                       title="어드민 미리보기 (상태 무관)">설문 미리보기</a>
-                    <a th:if="${e.status.name() == 'OPEN'}"
-                       class="btn btn-primary"
-                       th:href="@{|/survey/${e.eventCode}|}" target="_blank">공개 설문</a>
-                </td>
-                <td>
-                    <button class="btn btn-secondary" onclick="regenerateQr(this)">QR 재생성</button>
-                    <button class="btn btn-danger" onclick="deleteEvent(this)">삭제</button>
-                </td>
-            </tr>
-            <tr th:if="${#lists.isEmpty(events)}">
-                <td colspan="8">등록된 행사가 없습니다. "행사 생성"으로 추가하세요.</td>
-            </tr>
-            </tbody>
-        </table>
+        <div class="table-scroll">
+            <table id="events-table">
+                <thead>
+                <tr>
+                    <th>코드</th><th>라벨</th><th>일자</th><th>상태</th>
+                    <th>경품</th><th>QR</th><th>설문</th><th>리드</th><th style="width:160px;">관리</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="e : ${events}" th:attr="data-id=${e.id}, data-code=${e.eventCode}">
+                    <td><code th:text="${e.eventCode}"></code></td>
+                    <td th:text="${e.label}"></td>
+                    <td th:text="${e.eventDate}"></td>
+                    <td>
+                        <select onchange="changeStatus(this)">
+                            <option value="DRAFT"    th:selected="${e.status.name() == 'DRAFT'}">DRAFT</option>
+                            <option value="OPEN"     th:selected="${e.status.name() == 'OPEN'}">OPEN</option>
+                            <option value="CLOSED"   th:selected="${e.status.name() == 'CLOSED'}">CLOSED</option>
+                            <option value="ARCHIVED" th:selected="${e.status.name() == 'ARCHIVED'}">ARCHIVED</option>
+                        </select>
+                    </td>
+                    <td><a class="btn btn-sm btn-secondary" th:href="@{|/admin/events/${e.id}/prizes|}">재고</a></td>
+                    <td><a class="btn btn-sm btn-secondary" th:href="@{|/event/${e.eventCode}/qr|}" target="_blank">QR</a></td>
+                    <td>
+                        <div class="btn-group">
+                            <a class="btn btn-sm btn-secondary"
+                               th:href="@{|/admin/events/${e.id}/preview|}" target="_blank"
+                               title="어드민 미리보기 (상태 무관)">미리보기</a>
+                            <a th:if="${e.status.name() == 'OPEN'}"
+                               class="btn btn-sm btn-primary"
+                               th:href="@{|/survey/${e.eventCode}|}" target="_blank">공개 →</a>
+                        </div>
+                    </td>
+                    <td>
+                        <a class="btn btn-sm btn-secondary"
+                           th:href="@{|/admin/leads(eventCode=${e.eventCode})|}">리드 보기</a>
+                    </td>
+                    <td>
+                        <div class="btn-group">
+                            <button class="btn btn-sm btn-ghost" onclick="regenerateQr(this)" title="QR 캐시 무효화">↻ QR</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteEvent(this)">삭제</button>
+                        </div>
+                    </td>
+                </tr>
+                <tr th:if="${#lists.isEmpty(events)}">
+                    <td colspan="9" style="text-align:center; padding:32px 0;" class="muted">
+                        등록된 행사가 없습니다. "+ 행사 생성"으로 추가하세요.
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 </main>
 
@@ -61,7 +79,7 @@
             <div class="form-row">
                 <label>이벤트 제목</label>
                 <input name="label" required placeholder="DEVOPS DAY 2026">
-                <span class="muted">행사 코드(event_code)는 자동 생성됩니다 (예: <code>evt-x4p2k9</code>).</span>
+                <span class="field-help">행사 코드(event_code)는 자동 생성됩니다 (예: <code>evt-x4p2k9</code>).</span>
             </div>
             <div class="form-row">
                 <label>행사 시작일</label>

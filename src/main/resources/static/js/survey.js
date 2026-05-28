@@ -1,4 +1,4 @@
-/* WhaTap Picker - 설문 폼 동적 렌더링 + 분기 표시 */
+/* WhaTap Picker - 설문 폼 동적 렌더링 + 분기 표시 + 인라인 검증 피드백 */
 
 function surveyForm() {
     const schema = schemaJson;
@@ -15,6 +15,28 @@ function surveyForm() {
         return v;
     }
 
+    function validateField(field, v) {
+        const empty = field.type === 'CHECKBOX_MULTI'
+            ? !Array.isArray(v) || v.length === 0
+            : (v === '' || v === null || v === undefined);
+        if (empty) return field.type === 'CHECKBOX_MULTI'
+            ? '하나 이상 선택해 주세요.'
+            : '필수 항목입니다.';
+        if (field.type === 'PHONE' && field.pattern) {
+            try {
+                if (!new RegExp(field.pattern).test(v)) {
+                    return '휴대폰 번호 형식이 올바르지 않습니다. (예: 01012345678 — 010 다음 0 불가)';
+                }
+            } catch {}
+        }
+        if (field.type === 'EMAIL') {
+            if (!/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(v)) {
+                return '이메일 형식이 올바르지 않습니다. (예: name@company.com)';
+            }
+        }
+        return '';
+    }
+
     return {
         schema,
         pages: schema.pages || [],
@@ -23,8 +45,11 @@ function surveyForm() {
         currentIdx: 0,
         submitting: false,
         error: '',
+        attempted: {},        // pageIdx → true (사용자가 다음/제출 시도한 페이지)
+        consentsAttempted: false,
 
         get canGoPrev() { return this.currentIdx > 0; },
+        get currentPage() { return this.pages[this.currentIdx] || null; },
 
         visiblePage(pageId) {
             return this.pages[this.currentIdx] && this.pages[this.currentIdx].id === pageId;
@@ -60,6 +85,34 @@ function surveyForm() {
             this.values[key] = [...arr];
         },
 
+        /** 페이지의 (visible × required) 필드별 에러 맵 — 부수효과 없음. */
+        checkPage(page) {
+            const errs = {};
+            if (!page) return errs;
+            for (const f of page.fields || []) {
+                if (!f.required) continue;
+                if (!this.visibleField(f)) continue;
+                const msg = validateField(f, this.values[f.key]);
+                if (msg) errs[f.key] = msg;
+            }
+            return errs;
+        },
+
+        get currentPageErrors() { return this.checkPage(this.currentPage); },
+        get currentPageValid()  { return Object.keys(this.currentPageErrors).length === 0; },
+        get missingCount()      { return Object.keys(this.currentPageErrors).length; },
+        get consentsValid()     { return !this.consents.some(c => c.required && !this.values[c.key]); },
+
+        /** 사용자가 시도한 페이지에서만 에러 표시 → 처음부터 빨간색으로 도배되지 않게. */
+        errorFor(fieldKey) {
+            if (!this.attempted[this.currentIdx]) return '';
+            return this.currentPageErrors[fieldKey] || '';
+        },
+        consentError(consent) {
+            if (!this.consentsAttempted) return '';
+            return (consent.required && !this.values[consent.key]) ? '동의가 필요합니다.' : '';
+        },
+
         hasNextPage(currentId) {
             return !this.isLastPageVisible() && this.computeNextPageId(currentId) !== null;
         },
@@ -78,47 +131,14 @@ function surveyForm() {
             return null;
         },
 
-        /** 현재 페이지의 visible + required 필드가 모두 채워져 있는지 검증.
-         *  실패 시 첫 미달 필드 메시지 표시 + false 반환. */
-        validateCurrentPage() {
-            this.error = '';
-            const cur = this.pages[this.currentIdx];
-            if (!cur) return true;
-            for (const field of cur.fields || []) {
-                if (!field.required) continue;
-                if (!this.visibleField(field)) continue;
-                const v = this.values[field.key];
-                const empty = field.type === 'CHECKBOX_MULTI'
-                    ? !Array.isArray(v) || v.length === 0
-                    : (v === '' || v === null || v === undefined);
-                if (empty) {
-                    this.error = `'${field.label}' 을(를) 입력하거나 선택해 주세요.`;
-                    return false;
-                }
-                if (field.type === 'PHONE' && field.pattern) {
-                    try {
-                        if (!new RegExp(field.pattern).test(v)) {
-                            this.error = `'${field.label}' 형식이 올바르지 않습니다.`;
-                            return false;
-                        }
-                    } catch {}
-                }
-                if (field.type === 'EMAIL') {
-                    // 형식 보강: a@a.com 같은 짧은 도메인 막기 위해 TLD 최소 2자 + 도메인 점 2부 이상
-                    if (!/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(v)) {
-                        this.error = `'${field.label}' 형식이 올바르지 않습니다.`;
-                        return false;
-                    }
-                }
-            }
-            return true;
-        },
-
         next() {
-            if (!this.validateCurrentPage()) {
-                this.scrollToError();
+            this.attempted[this.currentIdx] = true;
+            if (!this.currentPageValid) {
+                this.error = `입력이 필요한 항목이 ${this.missingCount}개 있습니다. 빨간 표시를 확인해 주세요.`;
+                this.$nextTick(() => this.focusFirstError());
                 return;
             }
+            this.error = '';
             const cur = this.pages[this.currentIdx];
             const nextId = this.computeNextPageId(cur.id);
             if (!nextId) return;
@@ -141,9 +161,15 @@ function surveyForm() {
             window.scrollTo({ top: 0, behavior: 'smooth' });
         },
 
-        scrollToError() {
-            // 에러 메시지가 보이게 top 으로
-            this.scrollToTop();
+        focusFirstError() {
+            // 현재 화면에서 .field.has-error 첫 번째를 찾아 포커스 + 스크롤
+            const el = document.querySelector('.page .field.has-error input, .page .field.has-error select, .page .field.has-error textarea');
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => el.focus({ preventScroll: true }), 220);
+            } else {
+                this.scrollToTop();
+            }
         },
 
         /** 진짜 마지막 페이지(배열 마지막)일 때만 동의·제출 섹션 표시. */
@@ -152,6 +178,10 @@ function surveyForm() {
             if (!last) return false;
             const cur = this.pages[this.currentIdx];
             return cur && cur.id === last.id;
+        },
+
+        get canSubmit() {
+            return !this.submitting && this.currentPageValid && this.consentsValid;
         },
 
         buildPayload() {
@@ -173,7 +203,6 @@ function surveyForm() {
                 interestProducts: this.values.interestProducts || [],
                 planWithinYear: this.values.planWithinYear || null,
                 consultationPreference: this.values.consultationPreference || null,
-                // 동의 1개로 통합됨 — 백엔드는 두 필드 모두 true 요구.
                 privacyConsent: !!(this.values.fullConsent ?? this.values.privacyConsent),
                 marketingConsent: !!(this.values.fullConsent ?? this.values.marketingConsent)
             };
@@ -192,16 +221,21 @@ function surveyForm() {
         },
 
         async submit() {
+            this.attempted[this.currentIdx] = true;
+            this.consentsAttempted = true;
             this.error = '';
-            // 마지막 페이지 visible required 검증
-            if (!this.validateCurrentPage()) { this.scrollToError(); return; }
-            // 동의 모두 체크되었는지
-            const consentMissing = this.consents.some(c => c.required && !this.values[c.key]);
-            if (consentMissing) {
-                this.error = '동의 항목에 체크해 주세요.';
-                this.scrollToError();
+
+            if (!this.currentPageValid) {
+                this.error = `입력이 필요한 항목이 ${this.missingCount}개 있습니다. 빨간 표시를 확인해 주세요.`;
+                this.$nextTick(() => this.focusFirstError());
                 return;
             }
+            if (!this.consentsValid) {
+                this.error = '필수 동의 항목을 모두 체크해 주세요.';
+                this.scrollToTop();
+                return;
+            }
+
             this.submitting = true;
             try {
                 const res = await fetch('/api/leads', {
@@ -214,14 +248,14 @@ function surveyForm() {
                     const err = await res.json().catch(() => ({ message: '제출에 실패했습니다.' }));
                     this.error = err.message || '제출에 실패했습니다.';
                     this.submitting = false;
-                    this.scrollToError();
+                    this.scrollToTop();
                     return;
                 }
                 window.location.href = `/survey/${encodeURIComponent(eventCode)}/complete`;
             } catch (e) {
                 this.error = '네트워크 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
                 this.submitting = false;
-                this.scrollToError();
+                this.scrollToTop();
             }
         }
     };

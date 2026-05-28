@@ -1,23 +1,35 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{admin/layout :: head(title='대시보드')}"></head>
-<body>
-<nav th:replace="~{admin/layout :: nav}"></nav>
-<main class="admin-container">
-    <h1>대시보드</h1>
+<body class="admin-body">
+<nav th:replace="~{admin/layout :: nav('dashboard')}"></nav>
 
-    <div class="card">
-        <div class="toolbar">
+<main class="admin-container">
+    <header class="page-header">
+        <div class="title-block">
+            <p class="breadcrumb"><a th:href="@{/admin}">홈</a><span class="sep">›</span>대시보드</p>
+            <h1>대시보드</h1>
+            <p class="subtitle">행사별 또는 전체 통계를 보고, 마케팅 인사이트를 LLM 으로 생성합니다.</p>
+        </div>
+        <div class="actions">
             <select id="event-filter">
-                <option value="">전체</option>
+                <option value="">전체 행사</option>
                 <option th:each="e : ${events}" th:value="${e.eventCode}" th:text="|${e.eventCode} - ${e.label}|"></option>
             </select>
-            <button class="btn btn-secondary" onclick="loadAll()">새로고침</button>
-            <div class="spacer"></div>
-            <button class="btn btn-primary" onclick="exportSummary()">요약 CSV</button>
-            <button class="btn btn-primary" onclick="exportSegments()">세그먼트 CSV</button>
-            <button class="btn btn-primary" onclick="exportMonitoring()">모니터링 CSV</button>
-            <button class="btn btn-primary" onclick="exportIntent()">관심 CSV</button>
+            <button class="btn btn-secondary" onclick="loadAll()">↻ 새로고침</button>
+        </div>
+    </header>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>CSV 내보내기</h2>
+            <div class="spacer" style="flex:1;"></div>
+            <div class="btn-group">
+                <button class="btn btn-sm btn-secondary" onclick="exportSummary()">요약</button>
+                <button class="btn btn-sm btn-secondary" onclick="exportSegments()">세그먼트</button>
+                <button class="btn btn-sm btn-secondary" onclick="exportMonitoring()">모니터링</button>
+                <button class="btn btn-sm btn-secondary" onclick="exportIntent()">관심</button>
+            </div>
         </div>
     </div>
 
@@ -30,7 +42,7 @@
 
     <div class="card">
         <h2>산업 / 직급</h2>
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+        <div class="grid-2">
             <canvas id="industry-chart"></canvas>
             <canvas id="joblevel-chart"></canvas>
         </div>
@@ -38,7 +50,7 @@
 
     <div class="card">
         <h2>관심 제품 / 1년 내 계획</h2>
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+        <div class="grid-2">
             <canvas id="interest-chart"></canvas>
             <canvas id="plan-chart"></canvas>
         </div>
@@ -46,20 +58,21 @@
 
     <div class="card">
         <h2>모니터링 사용 현황 (raw)</h2>
-        <pre id="monitoring-data" style="background:#f9fafb; padding:12px; border-radius:6px; overflow:auto; max-height:300px;"></pre>
+        <pre id="monitoring-data" class="code-block" style="max-height:300px;"></pre>
     </div>
 
     <div class="card">
-        <h2>🤖 마케팅 인사이트 (LLM 자동 분석)</h2>
+        <div class="card-header">
+            <h2>🤖 마케팅 인사이트 (LLM 자동 분석)</h2>
+            <div class="spacer" style="flex:1;"></div>
+            <button class="btn btn-primary" id="insight-btn" onclick="generateInsight()">인사이트 생성</button>
+        </div>
         <p class="muted">
             현재 선택된 행사의 통계를 LLM 이 분석해 마케팅팀이 즉시 활용할 인사이트를 생성합니다.
             Ollama → 실패 시 Anthropic Claude (어드민 <a th:href="@{/admin/settings}">설정</a>에서 키 등록).
         </p>
-        <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">
-            <button class="btn btn-primary" id="insight-btn" onclick="generateInsight()">인사이트 생성</button>
-            <span id="insight-meta" class="muted"></span>
-        </div>
-        <div id="insight-content" style="background:#fafafa; padding:16px; border-radius:6px; min-height:80px; white-space:pre-wrap; line-height:1.6;">
+        <p id="insight-meta" class="muted"></p>
+        <div id="insight-content" class="code-block" style="white-space:pre-wrap; line-height:1.6; font-family:inherit; min-height:80px;">
             (아직 생성되지 않음)
         </div>
     </div>
@@ -96,12 +109,12 @@
     }
     async function loadSegments() {
         const seg = await adminApi.get('/api/admin/dashboard/segments' + param());
-        renderChart('industry-chart', 'bar',     Object.keys(seg.industry || {}), Object.values(seg.industry || {}), '산업');
+        renderChart('industry-chart', 'bar',      Object.keys(seg.industry || {}), Object.values(seg.industry || {}), '산업');
         renderChart('joblevel-chart', 'doughnut', Object.keys(seg.jobLevel || {}), Object.values(seg.jobLevel || {}), '직급');
     }
     async function loadIntent() {
         const intent = await adminApi.get('/api/admin/dashboard/intent' + param());
-        renderChart('interest-chart', 'bar',     Object.keys(intent.interestProducts || {}), Object.values(intent.interestProducts || {}), '관심 제품');
+        renderChart('interest-chart', 'bar',      Object.keys(intent.interestProducts || {}), Object.values(intent.interestProducts || {}), '관심 제품');
         renderChart('plan-chart',     'doughnut', Object.keys(intent.planWithinYear   || {}), Object.values(intent.planWithinYear   || {}), '1년 내 계획');
     }
     async function loadMonitoring() {
@@ -137,7 +150,7 @@
         const btn = document.getElementById('insight-btn');
         const content = document.getElementById('insight-content');
         const meta = document.getElementById('insight-meta');
-        btn.disabled = true; btn.textContent = '생성 중... (LLM 호출, 30초~1분)';
+        btn.disabled = true; btn.textContent = '생성 중...';
         content.textContent = '...';
         try {
             const r = await adminApi.post('/api/admin/dashboard/insights' + param());

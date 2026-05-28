@@ -88,6 +88,26 @@ public class MarketingInsightService {
         this.llmGateway = llmGateway;
     }
 
+    /**
+     * 임의 필터 결과(이미 집계된 통계 묶음)에 대한 인사이트.
+     * 리드 페이지 등에서 현재 보고 있는 슬라이스를 그대로 던질 때 사용.
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Object> generateForFiltered(String label, Map<String, Object> stats) {
+        StringBuilder ctx = new StringBuilder();
+        ctx.append("[필터 결과 라벨] ").append(label == null ? "(미지정)" : label).append('\n');
+        stats.forEach((k, v) -> ctx.append("- ").append(k).append(": ").append(v).append('\n'));
+
+        String userPrompt = ctx.toString();
+        LlmGateway.Outcome<String> out = llmGateway.completeText(SYSTEM_PROMPT, userPrompt);
+        return Map.of(
+                "insight",     out.value(),
+                "model",       out.modelName(),
+                "backend",     out.backend(),
+                "generatedAt", OffsetDateTime.now()
+        );
+    }
+
     @Transactional(readOnly = true)
     public Map<String, Object> generate(String eventCode, Map<String, Long> gradeDistribution) {
         Event event = (eventCode != null && !eventCode.isBlank())

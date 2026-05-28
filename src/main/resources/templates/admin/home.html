@@ -1,55 +1,119 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{admin/layout :: head(title='Admin Home')}"></head>
-<body>
-<nav th:replace="~{admin/layout :: nav}"></nav>
-<main class="admin-container">
-    <h1>WhaTap Picker 어드민</h1>
+<body class="admin-body">
+<nav th:replace="~{admin/layout :: nav('home')}"></nav>
 
+<main class="admin-container">
+    <header class="page-header">
+        <div class="title-block">
+            <h1>WhaTap Picker 어드민</h1>
+            <p class="subtitle">행사 운영, 리드 분석, 추첨까지 한 곳에서 — 행사를 만들고 QR 을 띄우면 시작입니다.</p>
+        </div>
+        <div class="actions">
+            <a class="btn btn-secondary" th:href="@{/admin/leads}">리드 보기</a>
+            <a class="btn btn-primary"   th:href="@{/admin/events}">+ 행사 생성</a>
+        </div>
+    </header>
+
+    <!-- 핵심 지표 -->
     <div class="dashboard-grid" id="quick-cards"></div>
 
+    <!-- 시작 액션 -->
     <div class="card">
-        <div class="toolbar">
-            <h2 style="margin:0;">행사 목록</h2>
-            <div class="spacer"></div>
-            <a class="btn btn-primary" th:href="@{/admin/events}">전체 관리 →</a>
+        <div class="card-header"><h2>빠른 시작</h2><span class="muted">자주 쓰는 동선만 모았습니다.</span></div>
+        <div class="grid-3">
+            <a class="dashboard-card is-link" th:href="@{/admin/events}">
+                <div class="label">① 행사 생성</div>
+                <div class="value" style="font-size:1.1rem;">행사 만들기</div>
+                <div class="delta">코드 자동 생성 · OPEN 즉시 공개</div>
+            </a>
+            <a class="dashboard-card is-link" href="#" onclick="goToFirstOpenQr(event)">
+                <div class="label">② QR 띄우기</div>
+                <div class="value" style="font-size:1.1rem;">진행 중 행사 QR</div>
+                <div class="delta">부스 모니터 풀스크린</div>
+            </a>
+            <a class="dashboard-card is-link" th:href="@{/admin/leads}">
+                <div class="label">③ 리드 + AI 분석</div>
+                <div class="value" style="font-size:1.1rem;">제출 데이터 보기</div>
+                <div class="delta">필터 · CSV · AI 인사이트</div>
+            </a>
         </div>
-        <table>
-            <thead><tr><th>코드</th><th>라벨</th><th>일자</th><th>상태</th><th>액션</th></tr></thead>
-            <tbody>
-            <tr th:each="e : ${events}">
-                <td><a th:href="@{|/admin/events/${e.id}/prizes|}" th:text="${e.eventCode}"></a></td>
-                <td th:text="${e.label}"></td>
-                <td th:text="${e.eventDate}"></td>
-                <td><span th:class="'status-badge status-' + ${e.status}" th:text="${e.status}"></span></td>
-                <td>
-                    <a class="btn btn-secondary" th:href="@{|/admin/events/${e.id}/prizes|}">재고</a>
-                    <a class="btn btn-secondary" th:href="@{|/event/${e.eventCode}/qr|}" target="_blank">QR</a>
-                    <a class="btn btn-secondary" th:href="@{|/admin/events/${e.id}/preview|}" target="_blank">미리보기</a>
-                    <a th:if="${e.status.name() == 'OPEN'}" class="btn btn-primary"
-                       th:href="@{|/survey/${e.eventCode}|}" target="_blank">공개 설문</a>
-                </td>
-            </tr>
-            <tr th:if="${#lists.isEmpty(events)}">
-                <td colspan="5">등록된 행사가 없습니다. <a th:href="@{/admin/events}">행사 생성</a>으로 추가하세요.</td>
-            </tr>
-            </tbody>
-        </table>
+    </div>
+
+    <!-- 행사 카드 그리드 -->
+    <div class="card">
+        <div class="card-header">
+            <h2>행사 목록</h2>
+            <span class="muted" th:text="|총 ${#lists.size(events)}건|"></span>
+            <div class="spacer" style="flex:1;"></div>
+            <a class="btn btn-secondary btn-sm" th:href="@{/admin/events}">전체 관리 →</a>
+        </div>
+
+        <div th:if="${#lists.isEmpty(events)}" class="muted" style="padding: 24px 0; text-align: center;">
+            등록된 행사가 없습니다.
+            <a th:href="@{/admin/events}">행사를 먼저 만들어주세요</a>.
+        </div>
+
+        <div th:unless="${#lists.isEmpty(events)}" class="event-card-grid">
+            <article class="event-card" th:each="e : ${events}">
+                <div style="display:flex; align-items:flex-start; gap:8px;">
+                    <h3 style="flex:1;" th:text="${e.label}"></h3>
+                    <span th:class="'status-badge status-' + ${e.status}" th:text="${e.status}"></span>
+                </div>
+                <div class="meta">
+                    <code th:text="${e.eventCode}"></code> · <span th:text="${e.eventDate}"></span>
+                </div>
+                <div class="actions">
+                    <a class="btn btn-sm btn-secondary"
+                       th:href="@{|/admin/events/${e.id}/prizes|}">경품</a>
+                    <a class="btn btn-sm btn-secondary"
+                       th:href="@{|/admin/leads(eventCode=${e.eventCode})|}">리드</a>
+                    <a class="btn btn-sm btn-secondary"
+                       th:href="@{|/event/${e.eventCode}/qr|}" target="_blank">QR</a>
+                    <a class="btn btn-sm btn-secondary"
+                       th:href="@{|/admin/events/${e.id}/preview|}" target="_blank">미리보기</a>
+                    <a th:if="${e.status.name() == 'OPEN'}"
+                       class="btn btn-sm btn-primary"
+                       th:href="@{|/survey/${e.eventCode}|}" target="_blank">공개 설문 →</a>
+                </div>
+            </article>
+        </div>
     </div>
 </main>
 
 <script>
+    async function goToFirstOpenQr(e) {
+        e.preventDefault();
+        try {
+            const list = await adminApi.get('/api/admin/events');
+            const open = (Array.isArray(list) ? list : list.content || [])
+                .find(ev => (ev.status === 'OPEN' || ev.status?.name === 'OPEN'));
+            if (!open) { toast('OPEN 상태의 행사가 없습니다.', true); return; }
+            window.open('/event/' + open.eventCode + '/qr', '_blank');
+        } catch (err) { toast(err.message, true); }
+    }
+
     async function loadQuick() {
         const cards = [];
         try {
             const ps = await adminApi.get('/api/admin/leads/pending-scores');
-            cards.push(`<div class="dashboard-card"><div class="label">AI 분석 대기</div><div class="value">${ps.pendingCount}</div></div>`);
-            cards.push(`<div class="dashboard-card"><div class="label">AI 분석 실패</div><div class="value">${ps.failedCount}</div></div>`);
+            const pendingWarn = ps.pendingCount > 0 || ps.failedCount > 0 ? 'warn' : '';
+            cards.push(`<a class="dashboard-card is-link" href="/admin/leads">
+                <div class="label">AI 분석 대기</div>
+                <div class="value ${pendingWarn}">${ps.pendingCount}</div>
+                <div class="delta">실패 ${ps.failedCount}건</div></a>`);
         } catch (e) {}
         try {
             const s = await adminApi.get('/api/admin/dashboard/summary');
-            cards.push(`<div class="dashboard-card"><div class="label">전체 리드</div><div class="value">${s.leadCount}</div></div>`);
-            cards.push(`<div class="dashboard-card"><div class="label">전체 추첨</div><div class="value">${s.drawCount}</div></div>`);
+            cards.push(`<a class="dashboard-card is-link" href="/admin/leads">
+                <div class="label">전체 리드</div>
+                <div class="value">${s.leadCount}</div>
+                <div class="delta">상담 희망 ${s.wantsConsultationCount}건</div></a>`);
+            cards.push(`<a class="dashboard-card is-link" href="/admin/dashboard">
+                <div class="label">전체 추첨</div>
+                <div class="value">${s.drawCount}</div>
+                <div class="delta">유효 메일 ${Math.round((s.validEmailRatio ?? 0) * 100)}%</div></a>`);
         } catch (e) {}
         document.getElementById('quick-cards').innerHTML = cards.join('');
     }

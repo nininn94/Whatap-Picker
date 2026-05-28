@@ -86,16 +86,18 @@ public class DashboardController {
     }
 
     private Map<String, Long> computeGradeDistribution(String eventCode) {
-        UUID eventId = null;
+        final UUID eventId;
         if (eventCode != null && !eventCode.isBlank()) {
             Event ev = eventRepository.findByEventCode(eventCode).orElse(null);
             if (ev == null) return Map.of();
             eventId = ev.getId();
+        } else {
+            eventId = null;
         }
         List<Lead> leads = (eventId == null)
                 ? leadRepository.findAll()
                 : leadRepository.findAll().stream()
-                    .filter(l -> l.getEventId().equals(eventId == null ? null : eventId)).toList();
+                    .filter(l -> eventId.equals(l.getEventId())).toList();
         Map<String, Long> out = new LinkedHashMap<>();
         out.put("A", 0L); out.put("B", 0L); out.put("C", 0L); out.put("PENDING", 0L);
         for (Lead l : leads) {

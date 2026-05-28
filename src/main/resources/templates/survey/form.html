@@ -19,7 +19,9 @@
                 <h2 x-show="page.title" x-text="page.title"></h2>
 
                 <template x-for="field in page.fields" :key="field.key">
-                    <div class="field" x-show="visibleField(field)" x-cloak>
+                    <div class="field"
+                         :class="{ 'has-error': errorFor(field.key) }"
+                         x-show="visibleField(field)" x-cloak>
                         <label x-text="field.label" :class="field.required ? 'required' : ''"></label>
                         <p class="helper" x-show="field.helper" x-text="field.helper" x-cloak></p>
 
@@ -27,18 +29,22 @@
                         <template x-if="['TEXT','EMAIL','PHONE'].includes(field.type)">
                             <input :type="field.type === 'EMAIL' ? 'email' : (field.type === 'PHONE' ? 'tel' : 'text')"
                                    :name="field.key" :required="field.required" x-model="values[field.key]"
+                                   :aria-invalid="!!errorFor(field.key)"
                                    :pattern="field.pattern">
                         </template>
 
                         <!-- LONG_ANSWER -->
                         <template x-if="field.type === 'LONG_ANSWER'">
                             <textarea :name="field.key" :required="field.required"
+                                      :aria-invalid="!!errorFor(field.key)"
                                       x-model="values[field.key]" rows="3"></textarea>
                         </template>
 
                         <!-- SELECT -->
                         <template x-if="field.type === 'SELECT'">
-                            <select :name="field.key" :required="field.required" x-model="values[field.key]">
+                            <select :name="field.key" :required="field.required"
+                                    :aria-invalid="!!errorFor(field.key)"
+                                    x-model="values[field.key]">
                                 <option value="">선택해주세요</option>
                                 <template x-for="opt in optionsFor(field)" :key="opt.value">
                                     <option :value="opt.value" x-text="opt.label"></option>
@@ -89,13 +95,26 @@
                                 </div>
                             </div>
                         </template>
+
+                        <!-- 인라인 에러 메시지 -->
+                        <p class="field-error" x-show="errorFor(field.key)" x-text="errorFor(field.key)" x-cloak></p>
                     </div>
                 </template>
 
-                <!-- 페이지 네비게이션 -->
+                <!-- 페이지 상태 안내 + 네비게이션 -->
+                <div class="page-status" x-show="attempted[currentIdx] && missingCount > 0" x-cloak>
+                    ⚠️ 입력이 필요한 항목 <strong x-text="missingCount"></strong>개 — 빨간 표시 확인
+                </div>
+
                 <div class="nav">
-                    <button type="button" @click="prev" x-show="canGoPrev" x-cloak>이전</button>
-                    <button type="button" @click="next" x-show="hasNextPage(page.id)" x-cloak>다음 →</button>
+                    <button type="button" class="btn-prev" @click="prev" x-show="canGoPrev" x-cloak>이전</button>
+                    <div style="flex:1;"></div>
+                    <button type="button" class="btn-next"
+                            :class="currentPageValid ? 'is-ready' : 'is-blocked'"
+                            :aria-disabled="!currentPageValid ? 'true' : 'false'"
+                            @click="next" x-show="hasNextPage(page.id)" x-cloak>
+                        다음 →
+                    </button>
                 </div>
             </section>
         </template>
@@ -104,23 +123,32 @@
         <section class="consents" x-show="isLastPageVisible()" x-cloak>
             <h2>동의 항목</h2>
             <template x-for="consent in consents" :key="consent.key">
-                <div class="consent">
+                <div class="consent" :class="{ 'has-error': consentError(consent) }">
                     <h3 x-text="consent.label"></h3>
                     <pre class="consent-body" x-text="consent.body"></pre>
                     <label class="option">
                         <input type="checkbox" :name="consent.key" x-model="values[consent.key]" required>
                         <span>동의합니다.</span>
                     </label>
+                    <p class="field-error" x-show="consentError(consent)" x-text="consentError(consent)" x-cloak></p>
                 </div>
             </template>
 
             <div class="nav">
-                <button type="button" @click="prev">이전</button>
-                <button type="submit" :disabled="submitting" x-text="submitting ? '제출 중...' : '제출하기'"></button>
+                <button type="button" class="btn-prev" @click="prev">이전</button>
+                <div style="flex:1;"></div>
+                <button type="submit"
+                        class="btn-submit"
+                        :class="canSubmit ? 'is-ready' : 'is-blocked'"
+                        :disabled="submitting"
+                        x-text="submitting ? '제출 중...' : (canSubmit ? '제출하기 ✓' : '필수 항목을 채워 주세요')"></button>
             </div>
 
             <p class="error" x-show="error" x-text="error" x-cloak></p>
         </section>
+
+        <!-- 페이지 공통: 상단 에러 배너 (페이지 안에 있어도 표시되도록 form 끝에 한 번 더) -->
+        <p class="error" x-show="error && !isLastPageVisible()" x-text="error" x-cloak></p>
     </form>
 </main>
 

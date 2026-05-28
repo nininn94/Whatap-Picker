@@ -7,19 +7,46 @@
     <link rel="stylesheet" th:href="@{/css/app.css}">
     <link rel="stylesheet" th:href="@{/css/admin.css}">
 </head>
-<body>
-<nav th:fragment="nav" class="admin-nav">
+<body class="admin-body">
+
+<button type="button" class="nav-mobile-toggle" aria-label="메뉴" onclick="toggleNav()">☰</button>
+
+<!-- 사이드바: 기본 호출은 nav('home') 처럼 active 키를 넘긴다. -->
+<nav th:fragment="nav(current)" class="admin-nav">
     <a th:href="@{/admin}" class="logo">WhaTap Picker</a>
+    <div class="section-label">운영</div>
     <ul>
-        <li><a th:href="@{/admin/events}">행사</a></li>
-        <li><a th:href="@{/admin/leads}">리드</a></li>
-        <li><a th:href="@{/admin/forms}">폼</a></li>
-        <li><a th:href="@{/admin/users}">계정</a></li>
-        <li><a th:href="@{/admin/dashboard}">대시보드</a></li>
-        <li><a th:href="@{/admin/settings}">설정</a></li>
+        <li><a th:href="@{/admin}"
+               th:classappend="${current == 'home'} ? 'active'">
+            <span class="icon">⌂</span> 홈</a></li>
+        <li><a th:href="@{/admin/events}"
+               th:classappend="${current == 'events'} ? 'active'">
+            <span class="icon">▦</span> 행사</a></li>
+        <li><a th:href="@{/admin/leads}"
+               th:classappend="${current == 'leads'} ? 'active'">
+            <span class="icon">≡</span> 리드</a></li>
+        <li><a th:href="@{/admin/dashboard}"
+               th:classappend="${current == 'dashboard'} ? 'active'">
+            <span class="icon">▤</span> 대시보드</a></li>
     </ul>
-    <button type="button" onclick="adminLogout()" class="btn btn-secondary" style="margin-left:auto;">로그아웃</button>
+    <div class="section-label">설정</div>
+    <ul>
+        <li><a th:href="@{/admin/forms}"
+               th:classappend="${current == 'forms'} ? 'active'">
+            <span class="icon">▤</span> 폼 템플릿</a></li>
+        <li><a th:href="@{/admin/users}"
+               th:classappend="${current == 'users'} ? 'active'">
+            <span class="icon">◍</span> 계정</a></li>
+        <li><a th:href="@{/admin/settings}"
+               th:classappend="${current == 'settings'} ? 'active'">
+            <span class="icon">⚙</span> 설정</a></li>
+    </ul>
+    <div class="nav-footer">
+        <div>WhaTap Picker</div>
+        <button type="button" class="btn-logout" onclick="adminLogout()">로그아웃</button>
+    </div>
 </nav>
+
 <div th:fragment="scripts">
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
     <script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
@@ -33,6 +60,14 @@
                     window.location.href = '/admin/login';
                 });
         }
+        function toggleNav() { document.body.classList.toggle('nav-open'); }
+        document.addEventListener('click', e => {
+            if (document.body.classList.contains('nav-open')
+                && !e.target.closest('.admin-nav')
+                && !e.target.closest('.nav-mobile-toggle')) {
+                document.body.classList.remove('nav-open');
+            }
+        });
     </script>
 </div>
 </body>

@@ -1,33 +1,42 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{admin/layout :: head(title='경품 재고 관리')}"></head>
-<body>
-<nav th:replace="~{admin/layout :: nav}"></nav>
-<main class="admin-container" th:attr="data-event-id=${event.id}">
-    <h1 th:text="|${event.label} - 경품 재고 관리|"></h1>
-    <p class="muted">
-        이벤트 코드: <code th:text="${event.eventCode}"></code>
-        | 상태: <span th:text="${event.status}"></span>
-        | 폼 잠금: <span th:text="${event.formLocked ? '🔒 잠김 (응답 시작됨)' : '🔓 열림'}"></span>
-    </p>
+<body class="admin-body">
+<nav th:replace="~{admin/layout :: nav('events')}"></nav>
 
-    <div class="toolbar">
-        <button class="btn btn-primary" onclick="addRow()">+ 등수 추가</button>
-        <button class="btn btn-primary" onclick="saveAll()">전체 저장</button>
-        <a class="btn btn-secondary" th:href="@{/admin/events}">← 행사 목록</a>
-    </div>
+<main class="admin-container" th:attr="data-event-id=${event.id}">
+    <header class="page-header">
+        <div class="title-block">
+            <p class="breadcrumb">
+                <a th:href="@{/admin}">홈</a><span class="sep">›</span>
+                <a th:href="@{/admin/events}">행사</a><span class="sep">›</span>
+                <code th:text="${event.eventCode}"></code>
+            </p>
+            <h1 th:text="|${event.label} · 경품 재고|"></h1>
+            <p class="subtitle">
+                상태 <span th:class="'status-badge status-' + ${event.status}" th:text="${event.status}"></span>
+                · 폼 잠금 <strong th:text="${event.formLocked ? '🔒 잠김 (응답 시작됨)' : '🔓 열림'}"></strong>
+            </p>
+        </div>
+        <div class="actions">
+            <a class="btn btn-secondary" th:href="@{|/admin/leads(eventCode=${event.eventCode})|}">리드 보기</a>
+            <a class="btn btn-secondary" th:href="@{|/event/${event.eventCode}/qr|}" target="_blank">QR 띄우기</a>
+            <button class="btn btn-secondary" onclick="addRow()">+ 등수 추가</button>
+            <button class="btn btn-primary"   onclick="saveAll()">전체 저장</button>
+        </div>
+    </header>
 
     <div class="card">
         <table id="prize-table">
             <thead>
             <tr>
-                <th style="width:80px;">등수</th>
+                <th style="width:70px;">등수</th>
                 <th>경품명</th>
-                <th style="width:120px;">초기 수량</th>
-                <th style="width:80px;">당첨</th>
-                <th style="width:80px;">잔여</th>
-                <th style="width:100px;">소진율</th>
-                <th style="width:140px;">액션</th>
+                <th style="width:110px;">초기 수량</th>
+                <th style="width:70px;">당첨</th>
+                <th style="width:70px;">잔여</th>
+                <th style="width:90px;">소진율</th>
+                <th style="width:90px;">액션</th>
             </tr>
             </thead>
             <tbody id="prize-body">
@@ -40,10 +49,12 @@
                 <td>
                     <span th:text="${#numbers.formatPercent((p.initialQty - p.remainingQty) * 1.0 / (p.initialQty == 0 ? 1 : p.initialQty), 1, 0)}"></span>
                 </td>
-                <td><button class="btn btn-danger" onclick="deletePrize(this)">삭제</button></td>
+                <td><button class="btn btn-sm btn-danger" onclick="deletePrize(this)">삭제</button></td>
             </tr>
             <tr th:if="${#lists.isEmpty(prizes)}">
-                <td colspan="7">등록된 경품이 없습니다. "+ 등수 추가"로 시작하세요.</td>
+                <td colspan="7" style="text-align:center; padding:24px 0;" class="muted">
+                    등록된 경품이 없습니다. "+ 등수 추가"로 시작하세요.
+                </td>
             </tr>
             </tbody>
         </table>
@@ -55,9 +66,8 @@
 
     function addRow() {
         const tbody = document.getElementById('prize-body');
-        // 빈 안내 행이 있으면 제거
-        const empty = tbody.querySelector('tr[colspan]');
-        if (empty) empty.remove();
+        const empty = tbody.querySelector('tr td[colspan]');
+        if (empty) empty.closest('tr').remove();
 
         const used = [...tbody.querySelectorAll('.rank-input')].map(i => parseInt(i.value, 10) || 0);
         let nextRank = 1;
@@ -69,7 +79,7 @@
             <td><input type="text" placeholder="경품명" class="name-input"></td>
             <td><input type="number" min="0" value="1" class="initial-input"></td>
             <td>-</td><td>-</td><td>-</td>
-            <td><button class="btn btn-secondary" onclick="this.closest('tr').remove()">취소</button></td>`;
+            <td><button class="btn btn-sm btn-secondary" onclick="this.closest('tr').remove()">취소</button></td>`;
         tbody.appendChild(tr);
     }
 

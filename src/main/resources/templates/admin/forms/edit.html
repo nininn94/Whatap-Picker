@@ -1,22 +1,30 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{admin/layout :: head(title='폼 편집')}"></head>
-<body>
-<nav th:replace="~{admin/layout :: nav}"></nav>
+<body class="admin-body">
+<nav th:replace="~{admin/layout :: nav('forms')}"></nav>
+
 <main class="admin-container" th:attr="data-form-id=${formId}">
-    <div class="toolbar">
-        <a class="btn btn-secondary" th:href="@{/admin/forms}">← 폼 목록</a>
-        <div class="spacer"></div>
-        <button class="btn btn-secondary" onclick="validateJson()">JSON 검증</button>
-        <button class="btn btn-primary" onclick="saveForm()">저장</button>
-    </div>
+    <header class="page-header">
+        <div class="title-block">
+            <p class="breadcrumb">
+                <a th:href="@{/admin}">홈</a><span class="sep">›</span>
+                <a th:href="@{/admin/forms}">폼 템플릿</a><span class="sep">›</span>편집
+            </p>
+            <h1 id="form-title">불러오는 중...</h1>
+            <p class="subtitle">
+                ⚠️ 시스템 핵심 키(firstName/lastName/phone/email/jobFunction/monitoringStatus/privacyConsent/marketingConsent 등)는 누락 시 저장 불가.
+                시스템 기본 템플릿(잠금)은 수정 불가 — 복사 후 편집하세요.
+            </p>
+        </div>
+        <div class="actions">
+            <a class="btn btn-secondary" th:href="@{/admin/forms}">← 폼 목록</a>
+            <button class="btn btn-secondary" onclick="validateJson()">JSON 검증</button>
+            <button class="btn btn-primary"   onclick="saveForm()">저장</button>
+        </div>
+    </header>
 
     <div class="card">
-        <h2 id="form-title">불러오는 중...</h2>
-        <p class="muted">
-            ⚠️ 시스템 핵심 키(firstName/lastName/phone/email/jobFunction/monitoringStatus/privacyConsent/marketingConsent 등)는 누락 시 저장 불가.
-            시스템 기본 템플릿(잠금)은 수정 불가 — 복사 후 편집하세요.
-        </p>
         <textarea id="schema-editor" class="json-editor" spellcheck="false"></textarea>
         <p id="validate-result" style="margin-top: 8px;"></p>
     </div>
@@ -25,10 +33,12 @@
 <script>
     const formId = document.querySelector('main').dataset.formId;
     let currentVersion = 0;
+    let currentName = '';
 
     async function load() {
         try {
             const data = await adminApi.get(`/api/admin/forms/${formId}`);
+            currentName = data.name;
             document.getElementById('form-title').textContent =
                 `${data.name} (v${data.version}${data.systemDefault ? ' · 🔒 시스템 기본' : ''})`;
             currentVersion = data.version;
@@ -51,10 +61,10 @@
         const r = parseSchema();
         const el = document.getElementById('validate-result');
         if (r.ok) {
-            el.style.color = '#16a34a';
+            el.style.color = 'var(--success)';
             el.textContent = '✅ JSON 형식 유효';
         } else {
-            el.style.color = '#dc2626';
+            el.style.color = 'var(--danger)';
             el.textContent = '❌ ' + r.error;
         }
     }
@@ -62,11 +72,13 @@
     async function saveForm() {
         const r = parseSchema();
         if (!r.ok) { toast('JSON 파싱 실패: ' + r.error, true); return; }
-        const name = prompt('템플릿 이름을 변경할까요? (취소하면 기존 이름 유지)') || document.getElementById('form-title').textContent.split(' (')[0];
+        const name = prompt('템플릿 이름을 변경할까요? (취소하면 기존 이름 유지)', currentName) || currentName;
         try {
             const res = await adminApi.put(`/api/admin/forms/${formId}`,
                 { name, schema: r.value, version: currentVersion });
             currentVersion = res.version;
+            currentName = name;
+            document.getElementById('form-title').textContent = `${name} (v${res.version})`;
             toast(`저장되었습니다 (v${res.version}).`);
         } catch (e) { toast(e.message, true); }
     }
