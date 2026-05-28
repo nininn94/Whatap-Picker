@@ -7,10 +7,11 @@ import io.whatap.picker.lead.LeadRepository;
 import io.whatap.picker.lead.event.LeadSubmittedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -47,31 +48,52 @@ public class SheetsSyncService {
         this.leadRepository = leadRepository;
     }
 
+    /**
+     * AFTER_COMMIT 시점에 실행 — Lead 가 DB 에 commit 된 후에야 호출되므로
+     * findById 가 누락되는 race condition 차단. (이전엔 @EventListener 가 publish 즉시
+     * 별도 스레드에서 돌아 commit 전에 leadRepository.findById 가 null 반환 → silent skip)
+     */
     @Async
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Transactional(readOnly = true)
     public void onLeadSubmitted(LeadSubmittedEvent ev) {
         try { syncOne(ev.leadId(), ev.eventId()); }
-        catch (Exception e) { log.warn("Sheets sync 실패 leadId={}: {}", ev.leadId(), e.toString()); }
+        catch (Exception e) { log.warn("Sheets sync 실패 leadId={}: {}", ev.leadId(), e.toString(), e); }
     }
 
     /** 행사+리드 한 쌍을 시트에 append (테스트/재동기화에서도 호출). */
     public void syncOne(UUID leadId, UUID eventId) throws Exception {
         Event event = eventRepository.findById(eventId).orElse(null);
-        if (event == null) return;
-        if (!event.isSheetsEnabled() || event.getSpreadsheetId() == null || event.getSpreadsheetId().isBlank()) return;
+        if (event == null) {
+            log.warn("Sheets sync skip — event not found eventId={}", eventId);
+            return;
+        }
+        if (!event.isSheetsEnabled()) {
+            log.info("Sheets sync skip — eventCode={} sheets_enabled=false", event.getEventCode());
+            return;
+        }
+        if (event.getSpreadsheetId() == null || event.getSpreadsheetId().isBlank()) {
+            log.info("Sheets sync skip — eventCode={} spreadsheetId 비어있음", event.getEventCode());
+            return;
+        }
         if (!sheets.isConfigured()) {
-            log.debug("Sheets 미설정 — skip (eventId={})", eventId);
+            log.warn("Sheets sync skip — Service Account JSON 미설정 (eventCode={})", event.getEventCode());
             return;
         }
         Lead lead = leadRepository.findById(leadId).orElse(null);
-        if (lead == null) return;
+        if (lead == null) {
+            log.warn("Sheets sync skip — lead not found leadId={}", leadId);
+            return;
+        }
 
         String sheetName = (event.getSheetName() == null || event.getSheetName().isBlank())
                 ? "Leads" : event.getSheetName();
 
+        log.info("Sheets sync 시작 eventCode={} sheet={} leadId={}",
+                event.getEventCode(), sheetName, leadId);
         sheets.ensureHeader(event.getSpreadsheetId(), sheetName, HEADER);
         sheets.appendRow(event.getSpreadsheetId(), sheetName, toRow(event, lead));
+        log.info("Sheets sync 완료 eventCode={} leadId={}", event.getEventCode(), leadId);
     }
 
     private static List<Object> toRow(Event event, Lead l) {

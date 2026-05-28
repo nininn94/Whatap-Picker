@@ -12,12 +12,13 @@ import io.whatap.picker.lead.event.LeadSubmittedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.context.event.EventListener;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -79,10 +80,14 @@ public class LeadScoringPipeline {
         this.llmGateway = llmGateway;
     }
 
-    @EventListener
+    /**
+     * AFTER_COMMIT 시점에 실행 — Lead 가 DB 에 commit 된 후에야 호출되므로
+     * findById 가 누락되는 race condition 차단.
+     */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     @Async
     public void onLeadSubmitted(LeadSubmittedEvent event) {
-        log.info("LeadSubmittedEvent received, scoring asynchronously: {}", event.leadId());
+        log.info("LeadSubmittedEvent received (after commit), scoring leadId={}", event.leadId());
         try {
             score(event.leadId());
         } catch (Exception e) {
