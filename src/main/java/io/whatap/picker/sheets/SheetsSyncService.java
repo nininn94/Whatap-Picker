@@ -61,6 +61,24 @@ public class SheetsSyncService {
         catch (Exception e) { log.warn("Sheets sync 실패 leadId={}: {}", ev.leadId(), e.toString(), e); }
     }
 
+    /**
+     * 리드 삭제 시 시트에서도 해당 행 제거. 시트 매핑이 없거나 미설정이면 silent skip.
+     * HEADER 마지막 컬럼이 "리드 ID" 라서 컬럼 letter 는 "R" (18번째). HEADER 순서 변경 시
+     * 이 letter 도 같이 바꿔야 함.
+     */
+    public boolean deleteOne(UUID leadId, UUID eventId) throws Exception {
+        Event event = eventRepository.findById(eventId).orElse(null);
+        if (event == null) return false;
+        if (!event.isSheetsEnabled() || event.getSpreadsheetId() == null || event.getSpreadsheetId().isBlank()) return false;
+        if (!sheets.isConfigured()) return false;
+
+        String sheetName = (event.getSheetName() == null || event.getSheetName().isBlank())
+                ? "Leads" : event.getSheetName();
+        log.info("Sheets deleteRow 시도 eventCode={} sheet={} leadId={}",
+                event.getEventCode(), sheetName, leadId);
+        return sheets.deleteRowByLeadId(event.getSpreadsheetId(), sheetName, "R", leadId.toString());
+    }
+
     /** 행사+리드 한 쌍을 시트에 append (테스트/재동기화에서도 호출). */
     public void syncOne(UUID leadId, UUID eventId) throws Exception {
         Event event = eventRepository.findById(eventId).orElse(null);

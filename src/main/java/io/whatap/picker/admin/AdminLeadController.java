@@ -44,19 +44,22 @@ public class AdminLeadController {
     private final LeadScoreRepository leadScoreRepository;
     private final MarketingInsightService insightService;
     private final ObjectMapper objectMapper;
+    private final io.whatap.picker.sheets.SheetsSyncService sheetsSyncService;
 
     public AdminLeadController(LeadRepository leadRepository,
                                EventRepository eventRepository,
                                DrawHistoryRepository drawHistoryRepository,
                                LeadScoreRepository leadScoreRepository,
                                MarketingInsightService insightService,
-                               ObjectMapper objectMapper) {
+                               ObjectMapper objectMapper,
+                               io.whatap.picker.sheets.SheetsSyncService sheetsSyncService) {
         this.leadRepository = leadRepository;
         this.eventRepository = eventRepository;
         this.drawHistoryRepository = drawHistoryRepository;
         this.leadScoreRepository = leadScoreRepository;
         this.insightService = insightService;
         this.objectMapper = objectMapper;
+        this.sheetsSyncService = sheetsSyncService;
     }
 
     @GetMapping
@@ -179,8 +182,43 @@ public class AdminLeadController {
     public Map<String, Object> deleteExpired() {
         List<Lead> expired = leadRepository.findByRetentionUntilBefore(LocalDate.now());
         int count = expired.size();
+        // Sheets 행도 함께 삭제 (best-effort)
+        java.util.Map<UUID, UUID> leadEventPairs = new java.util.HashMap<>();
+        for (Lead l : expired) leadEventPairs.put(l.getId(), l.getEventId());
         leadRepository.deleteAll(expired);
-        return Map.of("deleted", count);
+        int sheetDeleted = 0;
+        for (var entry : leadEventPairs.entrySet()) {
+            try { if (sheetsSyncService.deleteOne(entry.getKey(), entry.getValue())) sheetDeleted++; }
+            catch (Exception e) { /* best-effort, log only */ }
+        }
+        return Map.of("deleted", count, "sheetRowsDeleted", sheetDeleted);
+    }
+
+    /**
+     * 단건 삭제 — lead 삭제 시 lead_score 는 FK CASCADE, draw_history 는 lead_id 가 NULL
+     * 로 설정되어 보존됨. Sheets 매핑이 활성화된 행사면 시트 행도 함께 삭제 (best-effort).
+     */
+    @DeleteMapping("/{id}")
+    public Map<String, Object> deleteOne(@PathVariable UUID id) {
+        Lead lead = leadRepository.findById(id).orElseThrow(() ->
+                new io.whatap.picker.common.ApiException(
+                        io.whatap.picker.common.ErrorCode.NOT_FOUND, "리드를 찾을 수 없습니다."));
+        UUID eventId = lead.getEventId();
+        leadRepository.delete(lead);
+
+        boolean sheetDeleted = false;
+        String sheetMessage = null;
+        try {
+            sheetDeleted = sheetsSyncService.deleteOne(id, eventId);
+        } catch (Exception e) {
+            sheetMessage = e.getMessage() == null ? e.toString() : e.getMessage();
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("deleted", true);
+        out.put("leadId", id);
+        out.put("sheetRowDeleted", sheetDeleted);
+        if (sheetMessage != null) out.put("sheetError", sheetMessage);
+        return out;
     }
 
     /**

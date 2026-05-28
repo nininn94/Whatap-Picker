@@ -16,6 +16,7 @@
         <div class="actions">
             <a class="btn btn-secondary" th:href="@{/admin/leads}">← 목록</a>
             <button class="btn btn-secondary" onclick="rescoreOne()">Stage 재분석</button>
+            <button class="btn btn-danger" onclick="deleteThis()">삭제</button>
         </div>
     </header>
 
@@ -141,6 +142,19 @@
         } catch (e) { toast(e.message, true); }
         finally { done(); }
         return false;
+    }
+
+    async function deleteThis() {
+        if (!confirm('이 리드를 영구 삭제할까요? Sheets 매핑이 활성화돼 있으면 시트 행도 함께 삭제됩니다.')) return;
+        const done = busy('리드 삭제 중...');
+        try {
+            const r = await adminApi.del(`/api/admin/leads/${leadId}`);
+            toast(r.sheetRowDeleted ? '리드 + 시트 행 삭제 완료' :
+                  r.sheetError ? `리드 삭제 (시트 삭제 실패: ${r.sheetError})` :
+                  '리드 삭제 완료 (시트 매핑 없음/미발견)');
+            setTimeout(() => location.href = '/admin/leads', 800);
+        } catch (e) { toast(e.message, true); }
+        finally { done(); }
     }
 
     async function rescoreOne() {

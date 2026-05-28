@@ -7,6 +7,12 @@ import com.google.api.client.json.gson.GsonFactory;
 import com.google.api.services.sheets.v4.Sheets;
 import com.google.api.services.sheets.v4.SheetsScopes;
 import com.google.api.services.sheets.v4.model.AppendValuesResponse;
+import com.google.api.services.sheets.v4.model.BatchUpdateSpreadsheetRequest;
+import com.google.api.services.sheets.v4.model.DeleteDimensionRequest;
+import com.google.api.services.sheets.v4.model.DimensionRange;
+import com.google.api.services.sheets.v4.model.Request;
+import com.google.api.services.sheets.v4.model.Sheet;
+import com.google.api.services.sheets.v4.model.Spreadsheet;
 import com.google.api.services.sheets.v4.model.ValueRange;
 import com.google.auth.http.HttpCredentialsAdapter;
 import com.google.auth.oauth2.GoogleCredentials;
@@ -81,6 +87,55 @@ public class SheetsClient {
                 .update(spreadsheetId, headerRange, new ValueRange().setValues(List.of(header)))
                 .setValueInputOption("RAW")
                 .execute();
+    }
+
+    /**
+     * 지정 컬럼에서 leadId 가 있는 행을 찾아 삭제. 일치하는 행이 없으면 false.
+     * @param leadIdColumnLetter 리드 ID 가 들어있는 컬럼 (예: "R"). HEADER 순서와 일치해야 함.
+     */
+    public boolean deleteRowByLeadId(String spreadsheetId, String sheetName,
+                                     String leadIdColumnLetter, String leadId) throws Exception {
+        Sheets service = buildService();
+        // 1) 해당 sheet 의 gid (sheetId) 가져오기
+        Spreadsheet meta = service.spreadsheets().get(spreadsheetId).execute();
+        Integer sheetGid = null;
+        for (Sheet s : meta.getSheets()) {
+            if (s.getProperties() != null && sheetName.equals(s.getProperties().getTitle())) {
+                sheetGid = s.getProperties().getSheetId();
+                break;
+            }
+        }
+        if (sheetGid == null) {
+            log.warn("Sheets deleteRow: sheet '{}' 없음 (spreadsheetId={})", sheetName, spreadsheetId);
+            return false;
+        }
+        // 2) 해당 컬럼 전체 읽기
+        String range = quoteSheetName(sheetName) + "!" + leadIdColumnLetter + ":" + leadIdColumnLetter;
+        ValueRange vr = service.spreadsheets().values().get(spreadsheetId, range).execute();
+        List<List<Object>> values = vr.getValues();
+        if (values == null) return false;
+        int rowIdx0Based = -1;
+        for (int i = 0; i < values.size(); i++) {
+            List<Object> row = values.get(i);
+            if (!row.isEmpty() && leadId.equals(row.get(0).toString())) {
+                rowIdx0Based = i;
+                break;
+            }
+        }
+        if (rowIdx0Based < 0) return false;
+
+        // 3) 해당 행 삭제 (BatchUpdate + DeleteDimensionRequest)
+        service.spreadsheets().batchUpdate(spreadsheetId, new BatchUpdateSpreadsheetRequest()
+                .setRequests(List.of(new Request().setDeleteDimension(new DeleteDimensionRequest()
+                        .setRange(new DimensionRange()
+                                .setSheetId(sheetGid)
+                                .setDimension("ROWS")
+                                .setStartIndex(rowIdx0Based)
+                                .setEndIndex(rowIdx0Based + 1))))))
+                .execute();
+        log.info("Sheets deleteRow OK spreadsheetId={} sheet={} rowIdx={} leadId={}",
+                spreadsheetId, sheetName, rowIdx0Based, leadId);
+        return true;
     }
 
     /** 인증 + 시트 메타 단순 호출로 연결 확인. throw 가능. */
