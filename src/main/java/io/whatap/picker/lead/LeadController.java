@@ -7,7 +7,6 @@ import io.whatap.picker.lead.dto.LeadSubmitResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -30,7 +29,6 @@ public class LeadController {
     }
 
     @GetMapping("/search")
-    @PreAuthorize("hasAnyRole('OPERATOR','ADMIN')")
     public LeadSearchResponse search(@RequestParam String name,
                                      @RequestParam String phoneLast4,
                                      @RequestParam String eventCode) {

@@ -4,7 +4,6 @@ import io.whatap.picker.common.ApiException;
 import io.whatap.picker.common.ErrorCode;
 import io.whatap.picker.event.Event;
 import io.whatap.picker.event.EventRepository;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -13,7 +12,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/prizes")
-@PreAuthorize("hasAnyRole('OPERATOR','ADMIN')")
 public class PrizeController {
 
     private final PrizeRepository prizeRepository;

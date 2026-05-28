@@ -481,16 +481,19 @@ else                                    → 회사 메일 강제 (차단 도메�
 
 **역할별 권한 매트릭스**
 
-| 리소스 | 비인증 | OPERATOR | ADMIN |
-| --- | --- | --- | --- |
-| `POST /api/leads` (설문 제출, IP rate-limit 10/min) | ✅ | ✅ | ✅ |
-| `GET /survey/**`, `GET /event/**` (SSR) | ✅ | ✅ | ✅ |
-| `POST /api/auth/login` (5회 실패 시 IP 15분 잠금) | ✅ | ✅ | ✅ |
-| `GET /api/leads/search` | ❌ | ✅ | ✅ |
-| `POST /api/draw` | ❌ | ✅ | ✅ |
-| `GET /api/prizes` (조회) | ❌ | ✅ | ✅ |
-| `POST /api/ai/lead-score` | ❌ | ✅ | ✅ |
-| `/api/admin/**`, `/admin/**` (SSR) | ❌ | ❌ | ✅ |
+기획서 운영자 흐름(이름+휴대폰 뒷자리로 즉시 추첨)을 따라 **부스 운영용 API는 비인증 공개**. 어드민(행사/경품/리드/CSV 관리)만 로그인 필요.
+
+| 리소스 | 비인증 | ADMIN |
+| --- | --- | --- |
+| `POST /api/leads` (설문 제출, IP rate-limit 10/min) | ✅ | ✅ |
+| `GET /api/leads/search` (이름 + 휴대폰 뒷자리) | ✅ | ✅ |
+| `POST /api/draw` | ✅ | ✅ |
+| `GET /api/draw/history` | ✅ | ✅ |
+| `GET /api/prizes` | ✅ | ✅ |
+| `GET /survey/**`, `GET /event/**` (SSR) | ✅ | ✅ |
+| `POST /api/auth/login` (5회 실패 IP 15분 잠금) | ✅ | ✅ |
+| `POST /api/ai/lead-score` (재분석은 ADMIN, 설문 제출 직후 자동 호출은 시스템 내부) | ❌ | ✅ |
+| `/api/admin/**`, `/admin/**` (SSR) | ❌ | ✅ |
 
 ---
 

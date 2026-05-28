@@ -35,16 +35,20 @@ public class SecurityConfig {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // Public
+                        // 공개 — 부스 운영자가 별도 로그인 없이 사용 (기획서 운영자 흐름)
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/leads").permitAll()
-                        .requestMatchers("/survey/**", "/event/**").permitAll()
+                        .requestMatchers(HttpMethod.GET,  "/api/leads/search").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/draw").permitAll()
+                        .requestMatchers(HttpMethod.GET,  "/api/draw/history").permitAll()
+                        .requestMatchers(HttpMethod.GET,  "/api/prizes").permitAll()
+                        .requestMatchers("/survey/**", "/event/**", "/").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/actuator/health").permitAll()
                         .requestMatchers("/css/**", "/js/**", "/images/**", "/favicon.ico").permitAll()
-                        // Admin only
+                        // 어드민 전용
                         .requestMatchers("/api/admin/**", "/admin/**").hasRole("ADMIN")
-                        // Operator + Admin
-                        .requestMatchers("/api/**").hasAnyRole("OPERATOR", "ADMIN")
+                        // 그 외 인증 필요
+                        .requestMatchers("/api/**").authenticated()
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(new JwtAuthenticationFilter(tokenProvider),

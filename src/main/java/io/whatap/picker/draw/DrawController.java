@@ -8,7 +8,6 @@ import io.whatap.picker.draw.dto.DrawResponse;
 import io.whatap.picker.event.Event;
 import io.whatap.picker.event.EventRepository;
 import jakarta.validation.Valid;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,7 +16,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/draw")
-@PreAuthorize("hasAnyRole('OPERATOR','ADMIN')")
 public class DrawController {
 
     private final DrawService drawService;

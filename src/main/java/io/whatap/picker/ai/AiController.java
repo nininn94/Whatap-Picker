@@ -38,7 +38,7 @@ public class AiController {
     }
 
     @PostMapping("/api/ai/lead-score")
-    @PreAuthorize("hasAnyRole('OPERATOR','ADMIN')")
+    @PreAuthorize("hasRole('ADMIN')")
     public LeadScore score(@RequestBody ScoreRequest req) {
         if (req == null || req.leadId() == null) {
             throw new ApiException(ErrorCode.VALIDATION_FAILED, "leadId 가 필요합니다.");
