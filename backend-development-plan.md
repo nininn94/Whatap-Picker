@@ -20,6 +20,7 @@
 > - **Lead-Event 1:N**: Lead row마다 행사 1개에 귀속, UNIQUE(phone, event_id) — 다행사 참여 시 새 row
 > - **폼 스냅샷**: 행사 첫 제출 시점에 `Event.form_schema_snapshot`에 JSON 잠금, 이후 FormTemplate 수정해도 진행 중 행사 영향 없음
 > - **Event 상태머신**: DRAFT → OPEN → CLOSED → ARCHIVED
+> - **AI 리드 등급 v6**: 룰 선적용 + LLM 폴백, `NextAction` enum, 0~100 점수, 재시도(30s/5m/30m), 수동 등급 수정, 마케터 룰/프롬프트 어드민 편집, 모델 버전 추적, PENDING 모니터링
 
 ---
 
@@ -190,11 +191,56 @@ DrawHistory (추첨 결과)
 LeadScore (AI 분석 결과)
 ├── id (PK)
 ├── lead_id (FK, UNIQUE)
-├── grade (A/B/C)
-├── reason
-├── next_action
-└── created_at
+├── ai_status (ENUM AiStatus: PENDING | DONE | FAILED | RULE_ONLY | MANUAL_OVERRIDE)
+├── grade (ENUM Grade: A | B | C, nullable)
+├── score (SMALLINT 0~100, nullable)         # 정렬·필터용 점수
+├── next_action (ENUM NextAction)            # 자유 텍스트 아닌 enum
+├── reason (TEXT)                            # 룰/LLM 산출 사유 1~2문장
+├── source (ENUM ScoreSource: RULE | LLM | RULE_LLM_HYBRID | MANUAL)
+├── rule_hits (TEXT[])                       # 적용된 룰 code 목록
+├── model_name (예: "llama3.2:3b", nullable)
+├── model_version (Ollama digest, nullable)
+├── attempt_count (INT, 재시도 누적)
+├── last_attempted_at
+├── manually_overridden_by (FK AppUser, nullable)
+├── manually_overridden_at (nullable)
+├── created_at
+└── updated_at
+
+AiRule (마케터 편집 가능한 룰 — 선적용)
+├── id (PK)
+├── code (UNIQUE, 예: "EXEC_PLAN_AUTO_A")
+├── name (예: "결정권자 + 교체 계획 → A")
+├── priority (INT, 낮을수록 먼저 적용)
+├── condition (JSONB - 조건식)
+├── outcome (JSONB - { grade, score, nextAction, reason })
+├── enabled (boolean)
+├── updated_by (FK AppUser)
+├── created_at
+└── updated_at
+
+AiPromptTemplate (시스템 프롬프트 — 마케터 편집 가능)
+├── id (PK)
+├── name (UNIQUE)
+├── body (TEXT, 변수 치환)
+├── is_active (boolean - partial UNIQUE WHERE is_active = true)
+├── version (낙관적 잠금)
+├── updated_by (FK AppUser)
+├── created_at
+└── updated_at
 ```
+
+**`NextAction` enum (자유 텍스트 → 분류 가능)**
+
+| value | 의미 |
+| --- | --- |
+| `MEETING_PROPOSAL_24H` | 24시간 내 영업 미팅 제안 |
+| `MEETING_PROPOSAL_WEEK` | 1주 내 미팅 제안 |
+| `PRODUCT_INTRO_EMAIL` | 제품 소개 이메일 발송 |
+| `TECH_CONSULT_EMAIL` | 기술 컨설팅 안내 |
+| `NURTURE_NEWSLETTER` | 뉴스레터 등록 후속 |
+| `WEBINAR_INVITE` | 웨비나 초대 |
+| `NO_ACTION` | 후속 액션 불필요 |
 
 ### 3.1 `survey_payload` JSONB 스키마 (분기별)
 
@@ -328,6 +374,10 @@ else                                    → 회사 메일 강제 (차단 도메�
 - `Event(status)` 활성 행사 조회용
 - `FormTemplate(is_system_default)` partial UNIQUE WHERE is_system_default = true
 - `EmailRejectionLog(event_id, created_at)` 비율 계산용
+- `LeadScore(ai_status, last_attempted_at)` PENDING 모니터링/재시도 대상 조회용
+- `LeadScore(grade, score)` 대시보드/정렬용
+- `AiRule(enabled, priority)` 룰 적용 시 순회용
+- `AiPromptTemplate(is_active)` partial UNIQUE WHERE is_active = true
 
 ### 3.5 FormTemplate `schema` JSONB 구조
 
@@ -579,11 +629,17 @@ else                                    → 회사 메일 강제 (차단 도메�
       "jobLevel": "STAFF",
       "company": "와탭랩스",
       "drawn": false,
-      "drawnAt": null
+      "drawnAt": null,
+      "aiStatus": "DONE",
+      "grade": "B",
+      "score": 68
     }
   ]
 }
 ```
+
+- `aiStatus`가 `PENDING`이면 운영자 화면에서 "분석 중..." 표시 (등급/점수 hidden)
+- `FAILED`면 "분석 실패 (재시도 가능)" + 재시도 버튼
 - Lead가 행사별 row이므로 응답은 항상 해당 행사 제출자만 (`submitted` 플래그 불필요 — 결과에 있으면 제출했다는 뜻)
 - 동명이인/뒷자리 중복 시 여러 건 → 프론트에서 회사명/직급으로 선택
 
@@ -632,36 +688,177 @@ else                                    → 회사 메일 강제 (차단 도메�
 
 ### 4.5 참여 이력 — `GET /api/draw/history?leadId={}&eventDate={}` (OPERATOR/ADMIN)
 
-### 4.6 AI 리드 등급 — `POST /api/ai/lead-score` (OPERATOR/ADMIN)
+### 4.6 AI 리드 등급 (룰 선적용 + LLM 폴백)
 
-**Request**: `{ "leadId": "uuid" }`
+#### 4.6.0 처리 파이프라인
 
-**호출 시점**
-- **설문 제출 직후 비동기 자동 호출** (`@Async` + `ApplicationEventPublisher`)
-- 실패/타임아웃 시 `LeadScore` row를 `grade=null, reason="AI 분석 보류"`로 저장
-- 어드민/운영자가 재시도 가능 (수동 호출 = 같은 endpoint 호출, 기존 row upsert)
+```
+설문 제출 (POST /api/leads)
+    ↓
+LeadSubmittedEvent 발행
+    ↓
+@Async LeadScoringPipeline (트랜잭션 분리, retry 가능)
+    ↓
+┌─────────────────────────────────────────────────────┐
+│ 1. LeadScore upsert (ai_status=PENDING, attempt+1)   │
+│ 2. AiRule 적용 (enabled=true, priority asc)          │
+│    - condition 매칭 → outcome 채택, rule_hits 누적   │
+│    - 결정적 룰 hit (grade + score 확정) → 종료(RULE)│
+│    - 일부 룰만 hit → LLM에 hint 전달 (HYBRID)        │
+│ 3. LLM 호출 (룰 결정 안 된 경우만)                    │
+│    - Ollama /api/chat, format=json, timeout=10s     │
+│    - 입력: Lead 분류 + 의사 + survey_payload 요약    │
+│    - 출력: { grade, score, nextAction, reason }      │
+│ 4. LeadScore 업데이트 (DONE | RULE_ONLY | FAILED)    │
+└─────────────────────────────────────────────────────┘
+    ↓ (FAILED 경우)
+재시도 스케줄러: 30초 → 5분 → 30분 (최대 3회)
+    ↓
+1시간 이상 PENDING 잔존 → 어드민 알림 (Phase 9 확장)
+```
 
-**처리**
-- `Lead`의 분류 필드(`jobFunction`, `jobLevel`, `industry`, `companySize`)와 페이지 #7 응답(`adoptionBlocker`, `interestProducts`, `planWithinYear`, `consultationPreference`) + `survey_payload` 요약을 프롬프트로 구성
-- Ollama `POST http://ollama:11434/api/chat` 호출
-- `format: "json"` 강제 + 시스템 프롬프트에 JSON 스키마 명시
-- `LeadScore` 테이블에 upsert (`lead_id` UNIQUE)
+#### 4.6.1 자동/수동 분석 — `POST /api/ai/lead-score` (OPERATOR/ADMIN)
 
-**Response**
+**Request**
+```json
+{ "leadId": "uuid", "force": false }
+```
+
+- `force=true`: 기존 LeadScore가 DONE이어도 재실행 (모델 교체 시)
+- 호출 시점: ① 설문 제출 후 자동 비동기, ② 운영자/어드민 수동 재시도
+
+**Response (200)**
 ```json
 {
+  "leadId": "uuid",
+  "aiStatus": "DONE",
   "grade": "A",
-  "reason": "도입 검토 3개월 이내 + 상담 희망 + 결정권자",
-  "nextAction": "영업팀 1차 미팅 제안 메일 발송"
+  "score": 87,
+  "reason": "결정권자(임원) + 1년 내 교체 계획 + 현재 솔루션 불만족 시그널",
+  "nextAction": "MEETING_PROPOSAL_24H",
+  "source": "RULE_LLM_HYBRID",
+  "ruleHits": ["EXEC_PLAN_HINT"],
+  "modelName": "llama3.2:3b",
+  "modelVersion": "sha256:abc...",
+  "attemptCount": 1,
+  "lastAttemptedAt": "2026-05-28T10:01:00+09:00"
 }
 ```
 
-**프롬프트 가이드라인**
-- 입력 필드(고정): `jobFunction`, `jobLevel`, `industry`, `companySize`, `employeeCountRange`, `monitoringStatus`, `adoptionBlocker`, `interestProducts`, `planWithinYear`, `consultationPreference`
-- **`jobFunction == STUDENT_FREELANCER` 자동 C 등급** (마케팅 가치 낮음, AI 호출 생략 가능)
-- 그 외는 룰 + LLM 혼합: `planWithinYear == C_REPLACE | D_NEW_ADOPT && jobLevel ∈ {TOP_EXECUTIVE, SENIOR_MGR}` → A 후보
-- 등급 기준 시스템 프롬프트는 마케터가 검수
-- Ollama 호출 타임아웃 10초, 실패 시 `grade=null, reason="AI 분석 보류"` 폴백
+**Status 의미**
+- `PENDING`: 분석 진행 중 (방금 제출 + 비동기 잡 미완료)
+- `DONE`: LLM 또는 룰로 분석 완료
+- `RULE_ONLY`: 룰만으로 결정 (LLM 호출 안 함)
+- `FAILED`: 재시도 한도 도달, 수동 재시도 필요
+- `MANUAL_OVERRIDE`: 어드민이 수동 편집
+
+#### 4.6.2 수동 등급 수정 — `PATCH /api/admin/leads/{leadId}/score` (ADMIN)
+
+**Request**
+```json
+{
+  "grade": "B",
+  "score": 65,
+  "nextAction": "PRODUCT_INTRO_EMAIL",
+  "reason": "도입 시기 불확실해서 등급 하향 조정 (검수자: 김마케터)"
+}
+```
+
+- `ai_status` → `MANUAL_OVERRIDE`, `source` → `MANUAL`
+- `manually_overridden_by` = 호출한 어드민
+- 이후 자동 분석에서 덮어쓰지 않음 (재분석 원하면 `force=true`로 별도 호출)
+
+#### 4.6.3 시스템 프롬프트 (활성 1개)
+
+`AiPromptTemplate.is_active=true`인 row의 body를 사용. 변수는 Java side에서 안전하게 치환.
+
+**기본 프롬프트 (시드)**
+
+```text
+당신은 WhaTap(통합 모니터링 솔루션) 사내 부스 이벤트에서 수집된 B2B 리드를 평가하는 분류기입니다.
+
+[등급 기준]
+- A: 결정 권한 있음 + 도입/교체 계획 명확 + 현재 솔루션 불만족 또는 미사용
+- B: 영향력 있음 + 추가 도입/확장 계획 또는 만족하지만 신기능 관심
+- C: 결정권 낮음 + 명확한 계획 없음 또는 학생/프리랜서
+
+[점수 0-100]
+- A 등급: 80-100
+- B 등급: 50-79
+- C 등급: 0-49
+
+[적용 가능한 nextAction]
+- MEETING_PROPOSAL_24H, MEETING_PROPOSAL_WEEK,
+  PRODUCT_INTRO_EMAIL, TECH_CONSULT_EMAIL,
+  NURTURE_NEWSLETTER, WEBINAR_INVITE, NO_ACTION
+
+[입력]
+직무: {{jobFunction}}, 직급: {{jobLevel}}, 산업: {{industry}},
+기업규모: {{companySize}}, 직원수: {{employeeCountRange}},
+현재 모니터링: {{monitoringStatus}}
+{{#if commercial}}
+사용 상용툴: {{commercial.products}}, 만족도: {{commercial.satisfaction}},
+주요 불만: {{commercial.complaints}}, 연간예산: {{commercial.annualBudget}}
+{{/if}}
+{{#if openSource}}
+오픈소스 어려움: {{openSource.difficulties}}
+{{/if}}
+망설이는 이유: {{adoptionBlocker}}
+관심 제품: {{interestProducts}}
+1년 내 계획: {{planWithinYear}}
+상담 희망: {{consultationPreference}}
+
+{{#if ruleHits}}
+[적용된 룰 힌트] {{ruleHits}}
+{{/if}}
+
+[출력 형식 - JSON만, 다른 텍스트 금지]
+{
+  "grade": "A" | "B" | "C",
+  "score": 0-100 사이 정수,
+  "nextAction": 위 enum 중 하나,
+  "reason": "한국어 1~2문장 사유"
+}
+```
+
+#### 4.6.4 시드 룰 (AiRule 초기 데이터)
+
+| code | priority | condition (요약) | outcome |
+| --- | --- | --- | --- |
+| `STUDENT_AUTO_C` | 10 | `jobFunction == STUDENT_FREELANCER` | grade=C, score=20, nextAction=NURTURE_NEWSLETTER, reason="학생/프리랜서 - 후속 nurture 대상" → **종료 (LLM 호출 생략)** |
+| `EXEC_REPLACE_AUTO_A` | 20 | `jobLevel ∈ {TOP_EXECUTIVE, SENIOR_MGR} && planWithinYear ∈ {C_REPLACE, D_NEW_ADOPT}` | grade=A, score=90, nextAction=MEETING_PROPOSAL_24H, **결정적 룰 → 종료** |
+| `DISSATISFIED_HINT` | 30 | `survey_payload.other.commercial.satisfaction ∈ {DISSATISFIED, VERY_DISSATISFIED}` | grade hint=A, → **LLM에 hint 전달, 최종 등급은 LLM** |
+| `EXEC_PLAN_HINT` | 40 | `jobLevel == TOP_EXECUTIVE && consultationPreference == ONSITE_MEETING` | hint → LLM |
+| `NO_PLAN_HINT` | 50 | `planWithinYear == A_OPEN && jobLevel == STAFF` | grade hint=C → LLM |
+
+- 결정적 룰 = `outcome.grade`가 확정값일 때 LLM 생략
+- hint 룰 = LLM에 컨텍스트로 전달, 최종 판단은 LLM
+- `priority` 낮은 것부터 적용, 결정적 룰 hit 시 즉시 종료
+
+#### 4.6.5 재시도 정책
+
+- 첫 호출 실패 시 → 30초 후 자동 재시도 (Spring `@Retryable` + `@Async`)
+- 2번째 실패 → 5분 후
+- 3번째 실패 → 30분 후
+- 세 번 모두 실패 → `ai_status=FAILED`, 어드민 알림 필요
+- JSON 파싱 실패도 재시도 사유로 카운트
+- `attempt_count`, `last_attempted_at` 매 시도마다 갱신
+
+#### 4.6.6 PENDING/FAILED 모니터링
+
+- `GET /api/admin/leads/pending-scores` — PENDING 1시간 이상 + FAILED 목록
+- 어드민 홈 대시보드 카드에 "분석 대기/실패 N건" 표시
+- (Phase 9 확장) Slack/메일 알림 — `@Scheduled` 15분마다 체크
+
+#### 4.6.7 PENDING 자동 파기 정책
+
+- `Lead.retention_until` 도래 시 LeadScore도 cascade 삭제
+- PENDING/FAILED 상태도 동일하게 보존 기간 따름 (별도 만료 정책 없음)
+
+#### 4.6.8 모델 버전 추적
+
+- Ollama `/api/show` 응답의 `digest`를 `model_version`에 기록
+- 모델 교체 시 어드민이 `force=true`로 일괄 재분석 가능 (`POST /api/admin/leads/rescore?model=llama3.2:3b`)
 
 ### 4.7 AI 후속 메시지 (확장) — `POST /api/ai/follow-up-message` (ADMIN)
 
@@ -940,8 +1137,10 @@ ZXing으로 PNG 생성. 첫 호출 시 `event.qr_image_path`에 캐시.
 | `POST /admin/forms/{id}/preview` | 폼 미리보기 | 저장 없이 임시 렌더 |
 | `GET /admin/users` | 운영자 계정 | 생성/활성화 토글/비밀번호 리셋 |
 | `GET /admin/leads` | 리드 조회 | 필터 + 페이징 + 행 클릭 시 상세 + CSV 다운로드 버튼 |
-| `GET /admin/leads/{id}` | 리드 상세 | 설문 응답 전체 + 추첨 결과 + AI 등급 + 보존 만료일 |
 | `GET /admin/dashboard` | 분석 대시보드 | §4.B 7개 API 결과를 카드/차트로 시각화 |
+| `GET /admin/ai-rules` | AI 룰 관리 | 룰 목록, priority drag-and-drop, condition/outcome 편집, 시뮬레이션 |
+| `GET /admin/ai-prompts` | AI 프롬프트 관리 | 활성 프롬프트 본문 편집, 샘플 입력 테스트, 활성화 토글 |
+| `GET /admin/leads/{id}` | 리드 상세 + 등급 수동 수정 | grade/score/nextAction 편집 폼, `PATCH /api/admin/leads/{id}/score` 호출 |
 
 **재고 관리 화면 상세 (`/admin/events/{id}/prizes`)**
 - 표 형태로 1~5등 + 새 등수 추가 가능
@@ -1008,6 +1207,47 @@ ZXing으로 PNG 생성. 첫 호출 시 `event.qr_image_path`에 캐시.
 ### 4.D.7 행사 코드/QR 재생성 — `POST /api/admin/events/{eventId}/regenerate-qr`
 
 URL 변경 시 (예: `event_code` 변경) QR 캐시 무효화 + 재생성.
+
+---
+
+## 4.F AI 룰 / 프롬프트 관리 API (ADMIN)
+
+마케터가 코드 수정/배포 없이 등급 룰과 시스템 프롬프트를 편집.
+
+### 4.F.1 룰 목록 / 편집
+- `GET /api/admin/ai-rules` — 룰 목록 (priority asc)
+- `POST /api/admin/ai-rules` — 새 룰 생성 (`code`, `name`, `priority`, `condition`, `outcome`, `enabled`)
+- `PATCH /api/admin/ai-rules/{id}` — 룰 수정
+- `DELETE /api/admin/ai-rules/{id}` — 룰 삭제 (시드 룰은 disable만 가능, 삭제 불가)
+- `POST /api/admin/ai-rules/{id}/test` — 가상 Lead 입력으로 룰 시뮬레이션
+
+**`condition` JSONB 예시**
+```json
+{
+  "all": [
+    { "field": "jobLevel", "op": "in", "value": ["TOP_EXECUTIVE", "SENIOR_MGR"] },
+    { "field": "planWithinYear", "op": "in", "value": ["C_REPLACE", "D_NEW_ADOPT"] }
+  ]
+}
+```
+
+지원 op: `eq`, `neq`, `in`, `not_in`, `contains` (JSONB 경로 지원: `survey_payload.other.commercial.satisfaction`)
+
+### 4.F.2 시스템 프롬프트 관리
+- `GET /api/admin/ai-prompts` — 프롬프트 목록
+- `GET /api/admin/ai-prompts/{id}` — 본문 + 변수 목록
+- `POST /api/admin/ai-prompts` — 새 프롬프트
+- `PATCH /api/admin/ai-prompts/{id}` — 본문 수정 (낙관적 잠금)
+- `POST /api/admin/ai-prompts/{id}/activate` — 활성화 (다른 프롬프트 자동 비활성화)
+- `POST /api/admin/ai-prompts/{id}/test` — 샘플 Lead로 LLM 응답 테스트
+
+### 4.F.3 일괄 재분석 — `POST /api/admin/leads/rescore`
+
+```json
+{ "eventId": "uuid", "force": true, "filter": { "aiStatus": "FAILED" } }
+```
+
+PENDING/FAILED 또는 특정 행사 전체를 큐에 다시 넣음. 큐는 백그라운드 워커가 rate limit 지키며 처리.
 
 ---
 
@@ -1178,10 +1418,24 @@ src/main/java/io/whatap/picker/
 │   ├── Event.java, EventRepository.java
 │   └── PrizeController.java
 ├── ai/
-│   ├── AiController.java
+│   ├── AiController.java                 # /api/ai/lead-score, /api/admin/leads/{id}/score (override)
+│   ├── LeadScoringPipeline.java          # 룰 선적용 → LLM 폴백 오케스트레이션
 │   ├── LeadScoreService.java
 │   ├── LeadScore.java
-│   ├── FollowUpMessageService.java     # 확장
+│   ├── enums/                            # NextAction, Grade, AiStatus, ScoreSource
+│   ├── rules/
+│   │   ├── AiRule.java
+│   │   ├── AiRuleRepository.java
+│   │   ├── AiRuleEvaluator.java          # JSONB condition 평가기 (eq/in/contains/AND/OR)
+│   │   └── AdminRuleController.java      # /api/admin/ai-rules
+│   ├── prompt/
+│   │   ├── AiPromptTemplate.java
+│   │   ├── AiPromptService.java          # 변수 치환
+│   │   └── AdminPromptController.java    # /api/admin/ai-prompts
+│   ├── retry/
+│   │   ├── ScoringRetryScheduler.java    # 30s/5m/30m 백오프
+│   │   └── PendingMonitorJob.java        # 1h+ PENDING 어드민 알림
+│   ├── FollowUpMessageService.java       # 확장
 │   └── client/OllamaClient.java
 ├── admin/
 │   ├── AdminEventController.java
@@ -1207,7 +1461,9 @@ src/main/java/io/whatap/picker/
 │       ├── AdminPrizePageController.java      # /admin/events/{id}/prizes
 │       ├── AdminFormBuilderPageController.java # /admin/forms, /edit, /preview
 │       ├── AdminUserPageController.java       # /admin/users
-│       ├── AdminLeadPageController.java       # /admin/leads, /{id}
+│       ├── AdminLeadPageController.java       # /admin/leads, /{id} (등급 수동 수정 폼 포함)
+│       ├── AdminAiRulePageController.java     # /admin/ai-rules
+│       ├── AdminAiPromptPageController.java   # /admin/ai-prompts
 │       └── AdminDashboardPageController.java  # /admin/dashboard
 ├── qr/
 │   └── QrCodeService.java                 # ZXing 래퍼
@@ -1245,7 +1501,10 @@ src/main/resources/templates/
 │   ├── users/list.html
 │   ├── leads/
 │   │   ├── list.html          # 필터 + CSV 다운로드 버튼
-│   │   └── detail.html
+│   │   └── detail.html        # 설문 응답 + AI 등급 수동 수정 폼
+│   ├── ai/
+│   │   ├── rules.html         # 룰 목록/편집/시뮬레이션
+│   │   └── prompts.html       # 프롬프트 편집/테스트
 │   └── dashboard.html
 └── fragments/
     ├── field/                 # 필드 타입별 partial (text, select, radio, ...)
@@ -1256,7 +1515,7 @@ src/main/resources/templates/
 
 ## 7. 개발 단계 (해커톤 타임라인)
 
-> SSR 페이지 + 폼 빌더 추가로 **약 18~22h** 추정. 2~2.5일 분량. 핵심 경로(QR→설문→검색→추첨→대시보드)에 시간을 몰아주고 폼 빌더는 JSON 직편집부터 시작.
+> AI 룰 엔진 + 마케터 편집 UI 추가로 **약 21~25h** 추정. 2.5~3일 분량. 해커톤 시연만 기준이면 룰 엔진/프롬프트 편집 UI는 Phase 9로 미루고 룰은 하드코딩으로 시작 가능.
 
 ### Phase 0 — 인프라 셋업 (1h)
 - Spring Boot 프로젝트 생성, Gradle (web + thymeleaf + jpa + security + validation)
@@ -1303,11 +1562,17 @@ src/main/resources/templates/
 - `LeadAnalyticsService` + §4.B 7개 엔드포인트
 - JSONB 집계 SQL, `@Cacheable` 60초
 
-### Phase 8 — AI (Ollama) (1.5h)
-- `OllamaClient`, `LeadScoreService`, 폴백
+### Phase 8 — AI 리드 등급 (3h)
+- `OllamaClient` + JSON 파싱 + 재시도 (`@Retryable` 백오프 30s/5m/30m)
+- `LeadScoringPipeline` (룰 선적용 → LLM 폴백)
+- `AiRuleEvaluator` JSONB condition 평가
+- 시드 룰 5개 + 시드 프롬프트 1개 Flyway 마이그레이션
+- `PATCH /api/admin/leads/{id}/score` 수동 수정
+- `/api/admin/ai-rules`, `/api/admin/ai-prompts` CRUD + SSR 페이지
+- `PendingMonitorJob` (PENDING 1h+ 카운트)
 
 ### Phase 9 — 통합 & 데모 (2h 데모 + 잉여)
-- Phase 0~8 합계 ≈ 19h, **버퍼 + 데모 리허설 2~3h 확보 → 총 21~22h**
+- Phase 0~8 합계 ≈ 21h, **버퍼 + 데모 리허설 2~3h 확보 → 총 23~25h**
 - 데모 시나리오: 어드민 행사 생성 → 폼 커스텀 → 경품 세팅(`/admin/events/{id}/prizes`) → QR 풀스크린 → 모바일 QR 스캔 → 설문 → 운영자 로그인 → 검색 → 뽑기 → AI 등급 → 대시보드 → CSV 다운로드
 - 여유 시: 폼 시각화 빌더, follow-up message, XLSX export, 자동 파기 배치, 동의 철회 셀프 API
 
@@ -1407,6 +1672,14 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     # 최초 기동 후: docker exec -it <ollama> ollama pull llama3.2:3b
+    # GPU 가속이 있는 환경에서는 아래 deploy 블록 활성화 (NVIDIA Container Toolkit 필요)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
 
   app:
     build: .
@@ -1468,7 +1741,13 @@ curl http://localhost:8080/actuator/health
 - ✅ CORS: `security.cors.allowed-origins` 설정으로 운영자 SPA 허용
 - ✅ EmailRejectionLog: 검증 실패 시도 추적, validEmailRatio 분모용
 - ✅ LeadScore 트리거: 설문 제출 직후 비동기 자동 호출, 어드민 재시도 가능
-- [ ] Ollama JSON 응답 안정성 — `format: "json"` 강제만으로 충분한지, `function calling` 흉내 필요한지 실측
+- ✅ AI 등급: 룰 선적용 + LLM 폴백, NextAction enum, 0~100 점수
+- ✅ 재시도: 30초 / 5분 / 30분 백오프 3회
+- ✅ 마케터 편집: AiRule/AiPromptTemplate 어드민 SSR + API
+- ✅ 모델 버전 추적: Ollama digest를 model_version 저장
+- ✅ 수동 등급 수정: `PATCH /api/admin/leads/{id}/score`, MANUAL_OVERRIDE 상태
+- ✅ PENDING 모니터링: 1h+ PENDING 카운트, 일괄 재분석 API
+- ✅ docker-compose Ollama GPU 옵션 가이드
 - [ ] 자동 파기 배치 — 어드민 수동 버튼만으로 갈지, `@Scheduled` 잡 추가할지
 - [ ] 동의 철회 API — `event@whatap.io` 수신 수동 처리만 vs `POST /api/leads/{id}/withdraw`
 - [ ] 폼 빌더 UI 수준 — JSON 직편집 MVP 충분한지 vs 시각화 빌더까지 가야 하는지
@@ -1490,7 +1769,9 @@ curl http://localhost:8080/actuator/health
 10. **즉시 분석 가능한 CSV**: 47컬럼 리드 export + 대시보드 5종 CSV — Excel에서 한글 안 깨지고 바로 피벗 가능
 11. **무중단 폼 변경**: 행사 첫 제출 시점에 schema snapshot으로 잠금 → 진행 중 행사가 폼 수정에 영향받지 않음
 12. **보안 기본기**: BCrypt, JWT, IP 기반 brute force 잠금, 공개 엔드포인트 rate limit, 검증 실패 시도 로깅
+13. **하이브리드 AI 등급**: 룰 엔진으로 명백한 케이스 처리(LLM 호출 60~70% 절감) + LLM이 borderline 평가 — 정확도와 비용의 균형
+14. **마케터 셀프 서비스 AI**: 룰/프롬프트를 코드 배포 없이 어드민 UI에서 편집, 시뮬레이션으로 검증, 일괄 재분석 가능
 
 ---
 
-*이 계획서는 화요일 개발 논의용 v5 (정합성 검토 결과 28개 이슈 일괄 수정 + 어드민 SSR 페이지 추가) 입니다.*
+*이 계획서는 화요일 개발 논의용 v6 (AI 리드 등급 기능 전면 보강: 룰 엔진, 마케터 편집, 재시도, 수동 수정, 모델 추적) 입니다.*
