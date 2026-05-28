@@ -151,7 +151,7 @@
     // ── 컬럼 정의 ──
     const ESSENTIAL_KEYS = new Set([
         'name','company','phone','email','industry','jobFunction','jobLevel',
-        'monitoringStatus','planWithinYear','consultationPreference','grade','createdAt'
+        'monitoringStatus','planWithinYear','consultationPreference','grade','createdAt','__actions__'
     ]);
     const COLUMNS = [
         ['name',         '이름'],
@@ -184,7 +184,8 @@
         ['planWithinYear',  '1년 계획'],
         ['consultationPreference','상담'],
         ['grade',        'Stage'],
-        ['createdAt',    '제출']
+        ['createdAt',    '제출'],
+        ['__actions__',  '액션']
     ];
 
     const ENUM_KEY_BY_COL = {
@@ -297,6 +298,7 @@
     function renderCell(l, key) {
         if (key === 'name')  return `<td class="col-sticky-1"><a href="/admin/leads/${l.id}"><strong>${fmt(l[key])}</strong></a></td>`;
         if (key === 'grade') return `<td>${gradeBadge(l)}</td>`;
+        if (key === '__actions__') return `<td><button class="btn btn-sm btn-danger" onclick="deleteLead('${l.id}', '${(l.name || '').replace(/'/g,"\\'")}')">삭제</button></td>`;
         if (key === 'consultationPreference') {
             const v = l[key];
             if (!v) return `<td><span class="muted">-</span></td>`;
@@ -438,6 +440,19 @@
             } else {
                 toast(`재분석 완료 ${r.queued}건 — MQL ${d.MQL ?? 0} · Known ${d.KNOWN_LEAD ?? 0} · 기타 ${d.PENDING_OR_OTHER ?? 0}`);
             }
+            await refreshAll();
+        } catch (e) { toast(e.message, true); }
+        finally { done(); }
+    }
+
+    async function deleteLead(id, name) {
+        if (!confirm(`'${name || id}' 리드를 영구 삭제할까요?\n시트 매핑이 활성화된 행사면 시트 행도 함께 삭제됩니다.`)) return;
+        const done = busy('리드 삭제 중...');
+        try {
+            const r = await adminApi.del(`/api/admin/leads/${id}`);
+            toast(r.sheetRowDeleted ? '리드 + 시트 행 삭제 완료' :
+                  r.sheetError ? `리드 삭제 (시트 삭제 실패: ${r.sheetError})` :
+                  '리드 삭제 완료');
             await refreshAll();
         } catch (e) { toast(e.message, true); }
         finally { done(); }
