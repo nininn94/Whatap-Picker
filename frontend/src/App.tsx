@@ -422,7 +422,7 @@ export default function App() {
     try {
       const response = await drawPrize({
         leadId: participant.leadId,
-        eventDate: participant.eventDate,
+        eventCode: participant.eventCode,
       });
       const result = pickResultFromDrawResponse(response, cell.id, index + 1, participant);
       const nextCells = state.cells.map((item, cellIndex) =>

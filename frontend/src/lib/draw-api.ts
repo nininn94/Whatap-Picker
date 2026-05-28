@@ -78,7 +78,7 @@ export async function searchLeads(params: {
   );
 }
 
-export async function drawPrize(params: { leadId: string; eventDate: string }) {
+export async function drawPrize(params: { leadId: string; eventCode: string }) {
   return requestJson<DrawResponse>("/api/draw", {
     method: "POST",
     body: JSON.stringify(params),
@@ -91,9 +91,13 @@ export async function fetchDrawHistory(params: { leadId: string; eventCode: stri
   );
 }
 
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "").replace(/\/+$/, "");
+
 async function requestJson<T>(path: string, init?: RequestInit) {
-  const response = await fetch(path, {
+  const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+  const response = await fetch(url, {
     ...init,
+    credentials: "include",
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
       ...init?.headers,
