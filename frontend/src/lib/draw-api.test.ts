@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   drawPrize,
-  fetchAdminEvents,
+  fetchEvents,
   fetchDrawHistory,
   fetchPrizeInventory,
   searchLeads,
@@ -17,7 +17,6 @@ function jsonResponse(body: unknown, init?: ResponseInit) {
 describe("draw-api", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-    vi.unstubAllEnvs();
   });
 
   it("fetches prize inventory with the event code query", async () => {
@@ -34,25 +33,6 @@ describe("draw-api", () => {
 
     expect(response.eventCode).toBe("event-1");
     expect(fetchMock).toHaveBeenCalledWith("/api/prizes?eventCode=event-1", {
-      credentials: "include",
-      headers: {},
-    });
-  });
-
-  it("uses the configured public API base URL", async () => {
-    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "https://api.example.com/");
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({
-        eventCode: "event-1",
-        eventDate: "2026-05-28",
-        prizes: [],
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await fetchPrizeInventory("event-1");
-
-    expect(fetchMock).toHaveBeenCalledWith("https://api.example.com/api/prizes?eventCode=event-1", {
       credentials: "include",
       headers: {},
     });
@@ -79,11 +59,10 @@ describe("draw-api", () => {
     });
   });
 
-  it("fetches admin events", async () => {
+  it("fetches public events through the Next API proxy", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse([
         {
-          id: "event-id-1",
           eventCode: "event-1",
           eventDate: "2026-05-28",
           endDate: null,
@@ -94,10 +73,10 @@ describe("draw-api", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await fetchAdminEvents();
+    const response = await fetchEvents();
 
     expect(response[0].eventCode).toBe("event-1");
-    expect(fetchMock).toHaveBeenCalledWith("/api/admin/events", {
+    expect(fetchMock).toHaveBeenCalledWith("/api/events", {
       credentials: "include",
       headers: {},
     });

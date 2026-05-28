@@ -18,7 +18,6 @@ function eventsResponse() {
   return new Response(
     JSON.stringify([
       {
-        id: "event-id-1",
         eventCode: "event-1",
         eventDate: "2026-05-28",
         endDate: null,
@@ -26,7 +25,6 @@ function eventsResponse() {
         status: "OPEN",
       },
       {
-        id: "event-id-2",
         eventCode: "event-2",
         eventDate: "2026-05-29",
         endDate: null,
@@ -43,7 +41,7 @@ function renderAppWithEventCode(path = "/?eventCode=event-1", prizes: unknown[] 
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
     const parsedUrl = new URL(url, window.location.origin);
-    if (parsedUrl.pathname === "/api/admin/events") {
+    if (parsedUrl.pathname === "/api/events") {
       return Promise.resolve(eventsResponse());
     }
 

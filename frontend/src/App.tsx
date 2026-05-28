@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import {
   DrawApiError,
   drawPrize,
-  fetchAdminEvents,
+  fetchEvents,
   fetchDrawHistory,
   fetchPrizeInventory,
   searchLeads,
@@ -202,7 +202,7 @@ export default function App() {
     setEventListError("");
 
     try {
-      const response = await fetchAdminEvents();
+      const response = await fetchEvents();
       setAdminEvents(response);
       setEventCodeDraft((current) => {
         const currentCode = current.trim() || eventCode.trim();
@@ -887,7 +887,7 @@ export default function App() {
                       {isLoadingEvents ? "이벤트 불러오는 중" : "이벤트 선택"}
                     </option>
                     {adminEvents.map((item) => (
-                      <option key={item.id} value={item.eventCode}>
+                      <option key={item.eventCode} value={item.eventCode}>
                         {eventOptionLabel(item)}
                       </option>
                     ))}

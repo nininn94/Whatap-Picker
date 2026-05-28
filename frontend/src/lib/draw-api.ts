@@ -7,7 +7,6 @@ export type ApiPrize = {
 };
 
 export type ApiEvent = {
-  id: string;
   eventCode: string;
   eventDate: string;
   endDate: string | null;
@@ -103,13 +102,12 @@ export async function fetchDrawHistory(params: { leadId: string; eventCode: stri
   return normalizeDrawHistoryResponse(response);
 }
 
-export async function fetchAdminEvents() {
-  return requestJson<ApiEvent[]>("/api/admin/events");
+export async function fetchEvents() {
+  return requestJson<ApiEvent[]>("/api/events");
 }
 
 async function requestJson<T>(path: string, init?: RequestInit) {
-  const url = path.startsWith("http") ? path : `${apiBaseUrl()}${path}`;
-  const response = await fetch(url, {
+  const response = await fetch(path, {
     ...init,
     credentials: "include",
     headers: {
@@ -154,14 +152,6 @@ type BackendDrawHistoryResponse = Partial<DrawResponse> & {
   drawn?: boolean;
   awardedRank?: number | null;
 };
-
-function apiBaseUrl() {
-  return (
-    process.env.NEXT_PUBLIC_API_BASE_URL ??
-    process.env.NEXT_PUBLIC_API_BASE ??
-    ""
-  ).replace(/\/+$/, "");
-}
 
 function normalizeLeadSearchResponse(response: BackendLeadSearchResponse): LeadSearchResponse {
   return {

@@ -3,6 +3,22 @@ import { expect, test, type Page } from "@playwright/test";
 const STORAGE_KEY = "whatap-picker-display-v8";
 
 async function mockPrizeInventory(page: Page) {
+  await page.route("**/api/events", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          eventCode: "event-1",
+          eventDate: "2026-05-28",
+          endDate: null,
+          label: "첫 번째 이벤트",
+          status: "OPEN",
+        },
+      ]),
+    });
+  });
+
   await page.route("**/api/prizes?**", async (route) => {
     await route.fulfill({
       status: 200,
@@ -107,6 +123,11 @@ test("resets locally saved picked cells", async ({ page }) => {
     );
   });
   await page.reload();
+  await page.getByLabel("성").fill("wha");
+  await page.getByLabel("이름").fill("tap");
+  await page.getByLabel("전화번호 뒷자리").fill("1111");
+  await page.getByRole("button", { name: /이벤트 참여하기/ }).click();
+
   await expect(page.getByRole("button", { name: /초기화/ })).toBeEnabled();
 
   await page.getByRole("button", { name: /초기화/ }).click();
