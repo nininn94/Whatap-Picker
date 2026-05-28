@@ -40,10 +40,17 @@ public class AdminEventController {
     @PostMapping
     public Event create(@Valid @RequestBody EventCreateRequest req,
                         @AuthenticationPrincipal AppPrincipal principal) {
-        if (eventRepository.existsByEventCode(req.eventCode())) {
-            throw new ApiException(ErrorCode.IN_USE, "이미 사용 중인 event_code 입니다.");
+        String eventCode;
+        if (req.eventCode() == null || req.eventCode().isBlank()) {
+            eventCode = generateUniqueEventCode();
+        } else {
+            if (eventRepository.existsByEventCode(req.eventCode())) {
+                throw new ApiException(ErrorCode.IN_USE, "이미 사용 중인 event_code 입니다.");
+            }
+            eventCode = req.eventCode();
         }
-        Event event = new Event(req.eventCode(), req.eventDate(), req.label());
+
+        Event event = new Event(eventCode, req.eventDate(), req.label());
         event.setEndDate(req.endDate());
         event.setStatus(req.status() != null ? req.status() : EventStatus.DRAFT);
         event.setCreatedBy(principal != null ? principal.userId() : null);
@@ -54,6 +61,21 @@ public class AdminEventController {
         event.setFormTemplateId(template.getId());
 
         return eventRepository.save(event);
+    }
+
+    /** Crockford-like base32 (0/o, 1/l/i 제외) 6자 + "evt-" prefix. 약 7.5억 조합. */
+    private static final char[] ALPHABET =
+            "23456789abcdefghjkmnpqrstuvwxyz".toCharArray();
+    private static final java.security.SecureRandom RNG = new java.security.SecureRandom();
+
+    private String generateUniqueEventCode() {
+        for (int attempt = 0; attempt < 5; attempt++) {
+            StringBuilder sb = new StringBuilder("evt-");
+            for (int i = 0; i < 6; i++) sb.append(ALPHABET[RNG.nextInt(ALPHABET.length)]);
+            String candidate = sb.toString();
+            if (!eventRepository.existsByEventCode(candidate)) return candidate;
+        }
+        throw new ApiException(ErrorCode.INTERNAL_ERROR, "event_code 생성 실패. 다시 시도해 주세요.");
     }
 
     @GetMapping

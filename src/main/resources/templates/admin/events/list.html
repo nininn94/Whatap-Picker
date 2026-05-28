@@ -52,12 +52,9 @@
         <h2>새 행사 생성</h2>
         <form id="create-form" onsubmit="return submitCreate(event)">
             <div class="form-row">
-                <label>event_code <span class="muted">(소문자/숫자/하이픈, 80자 이하)</span></label>
-                <input name="eventCode" required pattern="[a-z0-9][a-z0-9\-]{0,79}" placeholder="devops-day-2026">
-            </div>
-            <div class="form-row">
-                <label>라벨</label>
+                <label>이벤트 제목</label>
                 <input name="label" required placeholder="DEVOPS DAY 2026">
+                <span class="muted">행사 코드(event_code)는 자동 생성됩니다 (예: <code>evt-x4p2k9</code>).</span>
             </div>
             <div class="form-row">
                 <label>행사 시작일</label>
@@ -90,7 +87,6 @@
         e.preventDefault();
         const f = e.target;
         const body = {
-            eventCode: f.eventCode.value,
             label: f.label.value,
             eventDate: f.eventDate.value,
             endDate: f.endDate.value || null,
