@@ -140,12 +140,20 @@ jobs:
             SPRING_AI_OLLAMA_INIT_PULL_MODEL_STRATEGY=never
             EOF
 
+            # 8GB EBS 디스크 보호 — pull 전에 먼저 청소 (실패 원인이었던 "no space left").
+            # 사용 중 이미지는 보존되고, dangling/unused 만 제거.
+            df -h / | tail -1 | awk '{print "디스크 사용(전): " $3 " / " $2 " (" $5 ")"}'
+            docker image prune -af || true
+            docker builder prune -af || true
+            sudo journalctl --vacuum-size=200M || true
+            df -h / | tail -1 | awk '{print "디스크 사용(후): " $3 " / " $2 " (" $5 ")"}'
+
             docker compose -f docker-compose.prod.yml pull app
             docker compose -f docker-compose.prod.yml up -d
             docker compose -f docker-compose.prod.yml ps
 
-            # 8GB 디스크 보호: 24h 이상 된 dangling 이미지 정리
-            docker image prune -af --filter "until=24h" || true
+            # 새로 떨어진 이미지의 이전 버전 정리
+            docker image prune -af || true
 
             # ─────────────────────────────────────────────────────────
             # 진단: 컨테이너 상태와 로그를 Actions 로그에 노출.
