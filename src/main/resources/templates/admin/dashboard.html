@@ -48,6 +48,21 @@
         <h2>모니터링 사용 현황 (raw)</h2>
         <pre id="monitoring-data" style="background:#f9fafb; padding:12px; border-radius:6px; overflow:auto; max-height:300px;"></pre>
     </div>
+
+    <div class="card">
+        <h2>🤖 마케팅 인사이트 (LLM 자동 분석)</h2>
+        <p class="muted">
+            현재 선택된 행사의 통계를 LLM 이 분석해 마케팅팀이 즉시 활용할 인사이트를 생성합니다.
+            Ollama → 실패 시 Anthropic Claude (어드민 <a th:href="@{/admin/settings}">설정</a>에서 키 등록).
+        </p>
+        <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">
+            <button class="btn btn-primary" id="insight-btn" onclick="generateInsight()">인사이트 생성</button>
+            <span id="insight-meta" class="muted"></span>
+        </div>
+        <div id="insight-content" style="background:#fafafa; padding:16px; border-radius:6px; min-height:80px; white-space:pre-wrap; line-height:1.6;">
+            (아직 생성되지 않음)
+        </div>
+    </div>
 </main>
 
 <script>
@@ -117,6 +132,26 @@
     async function exportSegments()   { try { await adminApi.download('/api/admin/dashboard/export/segments.csv'   + param()); } catch(e){ toast(e.message,true);} }
     async function exportMonitoring() { try { await adminApi.download('/api/admin/dashboard/export/monitoring.csv' + param()); } catch(e){ toast(e.message,true);} }
     async function exportIntent()     { try { await adminApi.download('/api/admin/dashboard/export/intent.csv'     + param()); } catch(e){ toast(e.message,true);} }
+
+    async function generateInsight() {
+        const btn = document.getElementById('insight-btn');
+        const content = document.getElementById('insight-content');
+        const meta = document.getElementById('insight-meta');
+        btn.disabled = true; btn.textContent = '생성 중... (LLM 호출, 30초~1분)';
+        content.textContent = '...';
+        try {
+            const r = await adminApi.post('/api/admin/dashboard/insights' + param());
+            content.textContent = r.insight || '(빈 응답)';
+            meta.textContent = `backend: ${r.backend} | model: ${r.model} | ${new Date(r.generatedAt).toLocaleString()}`;
+            toast('인사이트 생성 완료');
+        } catch (e) {
+            content.textContent = '생성 실패: ' + e.message
+                + '\n\nAnthropic 키가 설정되어 있는지 /admin/settings 에서 확인하세요.';
+            toast(e.message, true);
+        } finally {
+            btn.disabled = false; btn.textContent = '인사이트 생성';
+        }
+    }
 
     document.getElementById('event-filter').addEventListener('change', loadAll);
     loadAll();

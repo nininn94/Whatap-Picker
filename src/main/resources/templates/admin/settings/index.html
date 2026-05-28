@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head(title='설정')}"></head>
+<body>
+<nav th:replace="~{admin/layout :: nav}"></nav>
+<main class="admin-container">
+    <h1>설정</h1>
+
+    <div class="card">
+        <h2>외부 LLM (Claude / Anthropic)</h2>
+        <p class="muted">
+            로컬 Ollama 모델이 실패하거나 응답이 낮을 때 자동으로 Anthropic Claude API 를 폴백으로 사용합니다.
+            리드 평가와 마케팅 인사이트 모두에 적용됩니다.
+        </p>
+
+        <div id="anthropic-status" class="muted" style="margin-bottom: 16px;">로드 중...</div>
+
+        <form onsubmit="return saveAnthropic(event)" style="display:grid; gap:12px; max-width: 640px;">
+            <label>
+                <span style="display:block; font-weight:600; margin-bottom: 4px;">API 키</span>
+                <input name="apiKey" type="password" autocomplete="off"
+                       placeholder="sk-ant-api03-..." style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;">
+                <span class="muted" style="font-size: 0.85rem;">
+                    저장된 키는 마스킹으로 표시됩니다. 변경하지 않으려면 비워두세요.
+                </span>
+            </label>
+            <label>
+                <span style="display:block; font-weight:600; margin-bottom: 4px;">모델</span>
+                <input name="model" type="text" placeholder="claude-haiku-4-5"
+                       style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;">
+                <span class="muted" style="font-size: 0.85rem;">
+                    권장: <code>claude-haiku-4-5</code> (빠르고 저렴). 더 정확한 분석이 필요하면 <code>claude-sonnet-4-6</code>.
+                </span>
+            </label>
+            <label style="display:flex; align-items:center; gap:8px;">
+                <input name="enabled" type="checkbox" checked>
+                <span>활성화 (체크 해제 시 Ollama 만 사용)</span>
+            </label>
+            <div style="display:flex; gap:8px;">
+                <button type="submit" class="btn btn-primary">저장</button>
+                <button type="button" class="btn btn-danger" onclick="clearKey()">키 삭제</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>현재 적용 우선순위</h2>
+        <ol>
+            <li><strong>룰 엔진</strong> — 시드 룰 10개로 약 80% 케이스 즉시 분류 (LLM 호출 없음)</li>
+            <li><strong>Ollama 로컬 모델</strong> — <code>qwen2.5:1.5b</code>, 운영 환경 미배포 시 즉시 실패하고 다음 단계로</li>
+            <li><strong>Anthropic Claude</strong> — 위 키가 설정되어 있고 활성화일 때만</li>
+            <li><strong>FAILED</strong> — 모두 실패하면 PENDING 처리 후 어드민이 재시도</li>
+        </ol>
+    </div>
+</main>
+
+<script>
+    async function load() {
+        try {
+            const data = await adminApi.get('/api/admin/settings');
+            const a = data.anthropic;
+            const status = document.getElementById('anthropic-status');
+            status.innerHTML = a.configured
+                ? `✅ 활성: ${a.enabled ? 'YES' : 'NO'} | 모델: <code>${a.model}</code> | 키: <code>${a.apiKeyMask}</code>`
+                : '⚠️ API 키가 설정되지 않았습니다. (Ollama 만 사용 중)';
+            const f = document.forms[0];
+            f.model.value = a.model || '';
+            f.enabled.checked = !!a.enabled;
+        } catch (e) {
+            document.getElementById('anthropic-status').textContent = '로드 실패: ' + e.message;
+        }
+    }
+
+    async function saveAnthropic(e) {
+        e.preventDefault();
+        const f = e.target;
+        const body = { anthropic: {
+            apiKey:  f.apiKey.value || null,   // 비어있으면 기존 유지
+            model:   f.model.value || null,
+            enabled: f.enabled.checked
+        }};
+        try {
+            await adminApi.put('/api/admin/settings', body);
+            toast('저장되었습니다.');
+            f.apiKey.value = '';
+            load();
+        } catch (e) { toast(e.message, true); }
+        return false;
+    }
+
+    async function clearKey() {
+        if (!confirm('Anthropic API 키를 정말 삭제하시겠습니까?')) return;
+        try {
+            await adminApi.del('/api/admin/settings/anthropic/api-key');
+            toast('키가 삭제되었습니다.');
+            load();
+        } catch (e) { toast(e.message, true); }
+    }
+
+    load();
+</script>
+<div th:replace="~{admin/layout :: scripts}"></div>
+</body>
+</html>

@@ -91,6 +91,11 @@ public class AdminPageController {
         return "admin/users/list";
     }
 
+    @GetMapping("/settings")
+    public String settings() {
+        return "admin/settings/index";
+    }
+
     @GetMapping("/forms")
     public String forms() {
         return "admin/forms/list";

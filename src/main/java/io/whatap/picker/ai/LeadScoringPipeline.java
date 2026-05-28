@@ -11,9 +11,7 @@ import io.whatap.picker.lead.LeadRepository;
 import io.whatap.picker.lead.event.LeadSubmittedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
@@ -67,19 +65,16 @@ public class LeadScoringPipeline {
     private final LeadRepository leadRepository;
     private final LeadScoreRepository scoreRepository;
     private final RuleEngine ruleEngine;
-    private final ChatClient chatClient;
-    private final String modelName;
+    private final io.whatap.picker.ai.client.LlmGateway llmGateway;
 
     public LeadScoringPipeline(LeadRepository leadRepository,
                                LeadScoreRepository scoreRepository,
                                RuleEngine ruleEngine,
-                               ChatClient leadScoringChatClient,
-                               @Value("${spring.ai.ollama.chat.options.model:qwen2.5:1.5b}") String modelName) {
+                               io.whatap.picker.ai.client.LlmGateway llmGateway) {
         this.leadRepository = leadRepository;
         this.scoreRepository = scoreRepository;
         this.ruleEngine = ruleEngine;
-        this.chatClient = leadScoringChatClient;
-        this.modelName = modelName;
+        this.llmGateway = llmGateway;
     }
 
     @EventListener
@@ -122,20 +117,21 @@ public class LeadScoringPipeline {
         }
 
         try {
-            LeadScoreResult llmResult = callLlm(lead, outcome.hits());
+            var llmOutcome = callLlm(lead, outcome.hits());
             ScoreSource src = outcome.hits().isEmpty() ? ScoreSource.LLM : ScoreSource.RULE_LLM_HYBRID;
-            applyResult(scoreEntity, llmResult, src, AiStatus.DONE);
+            applyResult(scoreEntity, llmOutcome.value(), src, AiStatus.DONE);
+            scoreEntity.setModelName(llmOutcome.modelName());
         } catch (Exception ex) {
-            log.warn("Ollama LLM 호출 실패 (leadId={}): {}", leadId, ex.toString());
+            log.warn("LLM 호출 실패 (leadId={}): {}", leadId, ex.toString());
             scoreEntity.setAiStatus(AiStatus.FAILED);
             scoreEntity.setReason("AI 분석 보류: " + ex.getMessage());
         }
 
-        scoreEntity.setModelName(modelName);
         return scoreRepository.save(scoreEntity);
     }
 
-    private LeadScoreResult callLlm(Lead lead, java.util.List<String> hits) {
+    private io.whatap.picker.ai.client.LlmGateway.Outcome<LeadScoreResult> callLlm(
+            Lead lead, java.util.List<String> hits) {
         java.util.Map<String, Object> vars = new java.util.HashMap<>();
         vars.put("jobFunction",    nz(lead.getJobFunction()));
         vars.put("jobLevel",       nz(lead.getJobLevel()));
@@ -154,12 +150,7 @@ public class LeadScoringPipeline {
         vars.put("ruleHits",        String.join(", ", hits));
 
         String userPrompt = new PromptTemplate(USER_TEMPLATE).render(vars);
-
-        return chatClient.prompt()
-                .system(SYSTEM_PROMPT)
-                .user(userPrompt)
-                .call()
-                .entity(LeadScoreResult.class);
+        return llmGateway.scoreLead(SYSTEM_PROMPT, userPrompt);
     }
 
     private void applyResult(LeadScore entity, LeadScoreResult r, ScoreSource src, AiStatus status) {
