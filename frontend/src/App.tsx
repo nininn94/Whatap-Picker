@@ -8,6 +8,7 @@ import {
   type CellTone,
   type PickerCell,
 } from "./PickerCanvas";
+import { Confetti } from "./Confetti";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -96,6 +97,7 @@ export default function App() {
   const [selectedResult, setSelectedResult] = useState<PickResult | null>(null);
   const [activePickKey, setActivePickKey] = useState<string | null>(null);
   const [isRevealing, setIsRevealing] = useState(false);
+  const [confettiTrigger, setConfettiTrigger] = useState(0);
   const revealTimerRef = useRef<number | null>(null);
   const resultTimerRef = useRef<number | null>(null);
   const drawEffectRef = useRef<HTMLVideoElement | null>(null);
@@ -194,20 +196,18 @@ export default function App() {
 
   function showResult(result: PickResult) {
     setSelectedResult(result);
+    setConfettiTrigger((prev) => prev + 1);
 
     if (resultTimerRef.current !== null) {
       window.clearTimeout(resultTimerRef.current);
     }
 
-    resultTimerRef.current = window.setTimeout(() => {
-      resultTimerRef.current = null;
-      if (result.isMock) {
+    if (result.isMock) {
+      resultTimerRef.current = window.setTimeout(() => {
+        resultTimerRef.current = null;
         setSelectedResult(null);
-        return;
-      }
-
-      finishCycle();
-    }, RESULT_HOLD_DURATION_MS);
+      }, RESULT_HOLD_DURATION_MS);
+    }
   }
 
   function clearRevealTimer() {
@@ -279,10 +279,18 @@ export default function App() {
   }
 
   const resultOverlay = selectedResult ? (
-    <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-      <div className="select-none text-[96px] font-black leading-none text-white drop-shadow-[0_8px_24px_rgba(0,0,0,0.45)] sm:text-[132px]">
-        {selectedResult.rank}
+    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6">
+      <div className="select-none rounded-2xl bg-black px-10 py-7 text-center shadow-2xl">
+        <div className="text-[96px] font-black leading-none text-white sm:text-[132px]">
+          {selectedResult.rank}
+        </div>
+        <div className="mt-2 text-lg font-semibold text-white/70">{selectedResult.name}</div>
       </div>
+      {!selectedResult.isMock && (
+        <Button type="button" size="lg" className="h-12 px-10 text-base font-bold" onClick={finishCycle}>
+          확인
+        </Button>
+      )}
     </div>
   ) : null;
 
@@ -419,6 +427,7 @@ export default function App() {
               />
               {drawEffect}
               {resultOverlay}
+              <Confetti key={confettiTrigger} active={confettiTrigger > 0} />
             </div>
           </div>
 
@@ -485,6 +494,7 @@ export default function App() {
           />
           {drawEffect}
           {resultOverlay}
+          <Confetti key={confettiTrigger} active={confettiTrigger > 0} />
         </div>
       </section>
     </main>
