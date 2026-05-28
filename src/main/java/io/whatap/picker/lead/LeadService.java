@@ -62,7 +62,8 @@ public class LeadService {
 
         String phone = PhoneNormalizer.normalize(req.phone());
         if (phone == null) {
-            throw new ApiException(ErrorCode.VALIDATION_FAILED, "휴대폰 번호는 010 포함 11자리여야 합니다.");
+            throw new ApiException(ErrorCode.VALIDATION_FAILED,
+                    "휴대폰 번호는 010 포함 11자리여야 하며, 010 다음 첫 자리는 0이 될 수 없습니다.");
         }
 
         String email = req.email().trim().toLowerCase(Locale.ROOT);

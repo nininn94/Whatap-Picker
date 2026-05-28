@@ -17,7 +17,8 @@ public final class PhoneNormalizer {
             digits = "0" + digits.substring(2);
         }
         digits = digits.replaceAll("\\D", "");
-        if (digits.matches("^010\\d{8}$")) return digits;
+        // 010 다음 첫 자리는 0이 될 수 없음 (운영 번호 표준)
+        if (digits.matches("^010[1-9]\\d{7}$")) return digits;
         return null;
     }
 }

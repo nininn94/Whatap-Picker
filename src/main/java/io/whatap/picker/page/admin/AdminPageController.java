@@ -1,9 +1,11 @@
 package io.whatap.picker.page.admin;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import io.whatap.picker.common.ApiException;
 import io.whatap.picker.common.ErrorCode;
 import io.whatap.picker.event.Event;
 import io.whatap.picker.event.EventRepository;
+import io.whatap.picker.form.FormTemplateService;
 import io.whatap.picker.prize.Prize;
 import io.whatap.picker.prize.PrizeRepository;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -23,10 +25,14 @@ public class AdminPageController {
 
     private final EventRepository eventRepository;
     private final PrizeRepository prizeRepository;
+    private final FormTemplateService formTemplateService;
 
-    public AdminPageController(EventRepository eventRepository, PrizeRepository prizeRepository) {
+    public AdminPageController(EventRepository eventRepository,
+                               PrizeRepository prizeRepository,
+                               FormTemplateService formTemplateService) {
         this.eventRepository = eventRepository;
         this.prizeRepository = prizeRepository;
+        this.formTemplateService = formTemplateService;
     }
 
     @GetMapping
@@ -49,6 +55,23 @@ public class AdminPageController {
         model.addAttribute("event", event);
         model.addAttribute("prizes", prizes);
         return "admin/events/prizes";
+    }
+
+    /** 어드민용 설문 미리보기 — 행사 상태(OPEN 등) 무시하고 폼 렌더링. ADMIN 인증 필요. */
+    @GetMapping("/events/{id}/preview")
+    public String preview(@PathVariable UUID id, Model model) {
+        Event event = eventRepository.findById(id)
+                .orElseThrow(() -> new ApiException(ErrorCode.EVENT_NOT_FOUND));
+        JsonNode schema = event.getFormSchemaSnapshot();
+        if (schema == null) {
+            UUID tid = event.getFormTemplateId();
+            schema = (tid != null
+                    ? formTemplateService.get(tid)
+                    : formTemplateService.getSystemDefault()).getSchema();
+        }
+        model.addAttribute("event", event);
+        model.addAttribute("schema", schema);
+        return "survey/form";
     }
 
     @GetMapping("/leads")

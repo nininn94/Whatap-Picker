@@ -34,11 +34,12 @@
                 <td><a class="btn btn-secondary" th:href="@{|/admin/events/${e.id}/prizes|}">재고</a></td>
                 <td><a class="btn btn-secondary" th:href="@{|/event/${e.eventCode}/qr|}" target="_blank">QR</a></td>
                 <td>
+                    <a class="btn btn-secondary"
+                       th:href="@{|/admin/events/${e.id}/preview|}" target="_blank"
+                       title="어드민 미리보기 (상태 무관)">설문 미리보기</a>
                     <a th:if="${e.status.name() == 'OPEN'}"
-                       class="btn btn-secondary"
-                       th:href="@{|/survey/${e.eventCode}|}" target="_blank">설문</a>
-                    <span th:unless="${e.status.name() == 'OPEN'}"
-                          class="muted" th:title="${e.status} + ' 상태 — OPEN으로 변경하면 설문 공개'">설문 비공개</span>
+                       class="btn btn-primary"
+                       th:href="@{|/survey/${e.eventCode}|}" target="_blank">공개 설문</a>
                 </td>
                 <td>
                     <button class="btn btn-secondary" onclick="regenerateQr(this)">QR 재생성</button>

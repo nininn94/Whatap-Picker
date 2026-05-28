@@ -16,7 +16,7 @@
         <!-- 페이지 순회 -->
         <template x-for="page in pages" :key="page.id">
             <section class="page" x-show="visiblePage(page.id)" x-cloak>
-                <h2 x-text="page.title"></h2>
+                <h2 x-show="page.title" x-text="page.title"></h2>
 
                 <template x-for="field in page.fields" :key="field.key">
                     <div class="field" x-show="visibleField(field)" x-cloak>

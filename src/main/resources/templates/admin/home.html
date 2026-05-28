@@ -25,9 +25,9 @@
                 <td>
                     <a class="btn btn-secondary" th:href="@{|/admin/events/${e.id}/prizes|}">재고</a>
                     <a class="btn btn-secondary" th:href="@{|/event/${e.eventCode}/qr|}" target="_blank">QR</a>
-                    <a th:if="${e.status.name() == 'OPEN'}" class="btn btn-secondary"
-                       th:href="@{|/survey/${e.eventCode}|}" target="_blank">설문</a>
-                    <span th:unless="${e.status.name() == 'OPEN'}" class="muted">설문 비공개</span>
+                    <a class="btn btn-secondary" th:href="@{|/admin/events/${e.id}/preview|}" target="_blank">미리보기</a>
+                    <a th:if="${e.status.name() == 'OPEN'}" class="btn btn-primary"
+                       th:href="@{|/survey/${e.eventCode}|}" target="_blank">공개 설문</a>
                 </td>
             </tr>
             <tr th:if="${#lists.isEmpty(events)}">
