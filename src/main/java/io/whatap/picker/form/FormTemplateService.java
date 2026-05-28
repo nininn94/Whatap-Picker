@@ -19,14 +19,14 @@ public class FormTemplateService {
 
     private static final Logger log = LoggerFactory.getLogger(FormTemplateService.class);
 
-    /** plan v8 §3.5에 명시된 시스템 핵심 키 — 폼 빌더에서 제거/수정 불가. */
+    /** plan v8 §3.5에 명시된 시스템 핵심 키 — 폼 빌더에서 제거/수정 불가.
+     *  동의(consent) 키는 별도 처리: privacyConsent+marketingConsent 둘 다 OR fullConsent 단일. */
     private static final Set<String> REQUIRED_KEYS = Set.of(
             "firstName", "lastName", "phone", "email",
             "industry", "jobFunction", "jobLevel", "companySize",
             "employeeCountRange", "monitoringStatus",
             "adoptionBlocker", "interestProducts",
-            "planWithinYear", "consultationPreference",
-            "privacyConsent", "marketingConsent"
+            "planWithinYear", "consultationPreference"
     );
 
     private final FormTemplateRepository repository;
@@ -118,6 +118,15 @@ public class FormTemplateService {
                 throw new ApiException(ErrorCode.SCHEMA_INVALID,
                         "시스템 핵심 키 '%s' 가 schema 에서 누락되었습니다.".formatted(required));
             }
+        }
+
+        // 동의 항목: 통합형(fullConsent) 또는 분리형(privacyConsent+marketingConsent) 중 하나는 있어야 함
+        boolean hasUnifiedConsent = presentKeys.contains("fullConsent");
+        boolean hasSplitConsent   = presentKeys.contains("privacyConsent")
+                                 && presentKeys.contains("marketingConsent");
+        if (!hasUnifiedConsent && !hasSplitConsent) {
+            throw new ApiException(ErrorCode.SCHEMA_INVALID,
+                    "동의 항목이 필요합니다. (fullConsent 단일 또는 privacyConsent+marketingConsent)");
         }
     }
 }
