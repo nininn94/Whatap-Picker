@@ -28,15 +28,18 @@ public class AiController {
     private final LeadScoreRepository repository;
     private final LeadRepository leadRepository;
     private final EventRepository eventRepository;
+    private final io.whatap.picker.ai.rules.RuleEngine ruleEngine;
 
     public AiController(LeadScoringPipeline pipeline,
                         LeadScoreRepository repository,
                         LeadRepository leadRepository,
-                        EventRepository eventRepository) {
+                        EventRepository eventRepository,
+                        io.whatap.picker.ai.rules.RuleEngine ruleEngine) {
         this.pipeline = pipeline;
         this.repository = repository;
         this.leadRepository = leadRepository;
         this.eventRepository = eventRepository;
+        this.ruleEngine = ruleEngine;
     }
 
     @PostMapping("/api/ai/lead-score")
@@ -173,6 +176,47 @@ public class AiController {
         out.put("distribution", dist);
         if (firstError != null) out.put("firstError", firstError);
         if (!errorSamples.isEmpty()) out.put("errorSamples", errorSamples);
+        return out;
+    }
+
+    /**
+     * 분류 룰이 실제로 어떻게 평가되는지 진단용. DB save 없음 — 입력만 보고 결과 미리보기.
+     * UI 에서 "이 리드는 왜 MQL/KNOWN_LEAD?" 확인 가능.
+     */
+    @GetMapping("/api/admin/leads/{leadId}/classification-debug")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Map<String, Object> classificationDebug(@PathVariable UUID leadId) {
+        var lead = leadRepository.findById(leadId)
+                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "리드를 찾을 수 없습니다."));
+        var outcome = ruleEngine.evaluate(lead);
+        var existing = repository.findByLeadId(leadId).orElse(null);
+
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("leadId", leadId);
+        out.put("consultationPreference", lead.getConsultationPreference());
+        out.put("planWithinYear", lead.getPlanWithinYear());
+        out.put("rule.terminal", outcome.isTerminal());
+        out.put("rule.hits", outcome.hits());
+        if (outcome.isTerminal()) {
+            var r = outcome.toResult();
+            out.put("rule.grade", r.grade());
+            out.put("rule.score", r.score());
+            out.put("rule.nextAction", r.nextAction());
+            out.put("rule.reason", r.reason());
+        }
+        if (existing != null) {
+            out.put("stored.aiStatus", existing.getAiStatus());
+            out.put("stored.grade", existing.getGrade());
+            out.put("stored.score", existing.getScore());
+            out.put("stored.source", existing.getSource());
+            out.put("stored.attemptCount", existing.getAttemptCount());
+            out.put("stored.lastAttemptedAt", existing.getLastAttemptedAt());
+            out.put("stored.reason", existing.getReason());
+        } else {
+            out.put("stored", null);
+            out.put("stored.note", "이 lead 는 lead_score 행이 없음 — 분류가 한 번도 안 됐다는 뜻. " +
+                    "어드민에서 '전체 재분석' 또는 상세 페이지 'Stage 재분석' 실행 필요.");
+        }
         return out;
     }
 
