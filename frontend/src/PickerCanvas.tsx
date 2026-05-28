@@ -42,6 +42,8 @@ const pickedToneColor: Record<CellTone, string> = {
   white: "#f3f5f8",
 };
 
+const yAxisLabels = ["80s", "64s", "48s", "32s", "16s", "0s"];
+const xAxisLabels = ["12:22", "12:23", "12:24", "12:25", "12:26", "12:27", "12:28", "12:29", "12:30", "12:31"];
 export const PICK_REVEAL_DURATION_MS = 3334;
 
 export function PickerCanvas({
@@ -95,8 +97,9 @@ export function PickerCanvas({
 
       context.setTransform(dpr, 0, 0, dpr, 0, 0);
       context.clearRect(0, 0, canvasSize.width, canvasSize.height);
+      drawAxes(context, canvasSize.width, canvasSize.height, columns, rows);
       const layout = getGridLayout(canvasSize.width, canvasSize.height, columns, rows);
-      drawChartFrame(context, layout);
+      drawGridLines(context, layout, columns, rows);
 
       const rects: CellRect[] = [];
       const animationElapsed = now - animationStartRef.current;
@@ -105,8 +108,8 @@ export function PickerCanvas({
       cells.forEach((cell, index) => {
         const column = index % columns;
         const row = Math.floor(index / columns);
-        const x = layout.x + column * layout.stepX - layout.cellWidth / 2;
-        const y = layout.y + row * layout.stepY - layout.cellHeight / 2;
+        const x = layout.x + column * (layout.cellWidth + layout.gap);
+        const y = layout.y + row * (layout.cellHeight + layout.gap);
         rects[index] = { x, y, width: layout.cellWidth, height: layout.cellHeight };
         drawCell(context, cell, x, y, layout.cellWidth, layout.cellHeight, index === hoverIndex);
 
@@ -191,53 +194,90 @@ export function PickerCanvas({
 }
 
 function getGridLayout(width: number, height: number, columns: number, rows: number) {
-  const insetX = width < 520 ? 12 : 22;
-  const insetY = width < 520 ? 14 : 22;
-  const frameWidth = Math.max(1, width - insetX * 2);
-  const frameHeight = Math.max(1, height - insetY * 2);
-  const rawStepX = frameWidth / Math.max(1, columns - 1);
-  const rawStepY = frameHeight / Math.max(1, rows - 1);
-  const markerSize = clampCanvasNumber(Math.min(rawStepX * 0.62, rawStepY * 0.28), 4, 9);
-  const stepX = (frameWidth - markerSize) / Math.max(1, columns - 1);
-  const stepY = (frameHeight - markerSize) / Math.max(1, rows - 1);
+  const axisLeft = width < 520 ? 38 : 58;
+  const axisBottom = width < 520 ? 28 : 42;
+  const top = 12;
+  const right = 10;
+  const gap = width < 520 ? 1 : 2;
+  const availableWidth = width - axisLeft - right;
+  const availableHeight = height - top - axisBottom;
+  const cellWidth = Math.max(3, (availableWidth - (columns - 1) * gap) / columns);
+  const cellHeight = Math.max(3, (availableHeight - (rows - 1) * gap) / rows);
+  const gridWidth = columns * cellWidth + (columns - 1) * gap;
+  const gridHeight = rows * cellHeight + (rows - 1) * gap;
 
   return {
-    frameX: insetX,
-    frameY: insetY,
-    frameWidth,
-    frameHeight,
-    x: insetX + markerSize / 2,
-    y: insetY + markerSize / 2,
-    cellWidth: markerSize,
-    cellHeight: markerSize,
-    stepX,
-    stepY,
-    gridWidth: frameWidth,
-    gridHeight: frameHeight,
+    x: axisLeft,
+    y: top,
+    cellWidth,
+    cellHeight,
+    gap,
+    gridWidth,
+    gridHeight,
   };
 }
 
-function drawChartFrame(
+function drawAxes(
   context: CanvasRenderingContext2D,
-  layout: ReturnType<typeof getGridLayout>,
+  width: number,
+  height: number,
+  columns: number,
+  rows: number,
 ) {
   context.save();
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, layout.frameX * 2 + layout.frameWidth, layout.frameY * 2 + layout.frameHeight);
+  context.fillStyle = "#202124";
+  context.font = width < 520 ? "600 12px Inter, sans-serif" : "600 20px Inter, sans-serif";
+  context.textAlign = "right";
+  context.textBaseline = "middle";
 
-  context.strokeStyle = "#202124";
-  context.lineWidth = 1.5;
-  context.strokeRect(layout.frameX, layout.frameY, layout.frameWidth, layout.frameHeight);
+  const layout = getGridLayout(width, height, columns, rows);
+  yAxisLabels.forEach((label, index) => {
+    const y = layout.y + (layout.gridHeight / (yAxisLabels.length - 1)) * index;
+    context.fillText(label, layout.x - 10, y);
+  });
+
+  context.textBaseline = "top";
+  const labels = width < 520 ? xAxisLabels.filter((_, index) => index % 2 === 0) : xAxisLabels;
+  labels.forEach((label, index) => {
+    const x = layout.x + (layout.gridWidth / Math.max(1, labels.length - 1)) * index;
+    context.textAlign = index === 0 ? "left" : index === labels.length - 1 ? "right" : "center";
+    context.fillText(label, x, layout.y + layout.gridHeight + 10);
+  });
 
   context.strokeStyle = "#9aa0a6";
-  context.lineWidth = 1.25;
-  context.setLineDash([3, 4]);
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(layout.x - 1, layout.y - 1);
+  context.lineTo(layout.x - 1, layout.y + layout.gridHeight + 1);
+  context.lineTo(layout.x + layout.gridWidth + 1, layout.y + layout.gridHeight + 1);
+  context.stroke();
+  context.restore();
+}
 
-  for (let guide = 1; guide < 5; guide += 1) {
-    const y = layout.frameY + (layout.frameHeight / 5) * guide;
+function drawGridLines(
+  context: CanvasRenderingContext2D,
+  layout: ReturnType<typeof getGridLayout>,
+  columns: number,
+  rows: number,
+) {
+  context.save();
+  context.strokeStyle = "rgba(60, 64, 67, 0.08)";
+  context.lineWidth = 1;
+  context.setLineDash([2, 4]);
+
+  for (let column = 5; column < columns; column += 5) {
+    const x = layout.x + column * (layout.cellWidth + layout.gap) - layout.gap / 2;
     context.beginPath();
-    context.moveTo(layout.frameX, y);
-    context.lineTo(layout.frameX + layout.frameWidth, y);
+    context.moveTo(x, layout.y - 3);
+    context.lineTo(x, layout.y + layout.gridHeight + 3);
+    context.stroke();
+  }
+
+  for (let row = 2; row < rows; row += 2) {
+    const y = layout.y + row * (layout.cellHeight + layout.gap) - layout.gap / 2;
+    context.beginPath();
+    context.moveTo(layout.x - 3, y);
+    context.lineTo(layout.x + layout.gridWidth + 3, y);
     context.stroke();
   }
 
@@ -254,14 +294,13 @@ function drawCell(
   isHovered: boolean,
 ) {
   if (cell.empty) return;
-  if (cell.tone === "white" && !isHovered) return;
 
   context.save();
-  context.fillStyle = cell.tone === "white" ? "rgba(255, 255, 255, 0.72)" : toneColor[cell.tone];
-  context.strokeStyle = cell.tone === "white" ? "rgba(26, 115, 232, 0.34)" : "rgba(255, 255, 255, 0.72)";
-  context.lineWidth = 1;
+  context.fillStyle = toneColor[cell.tone];
+  context.strokeStyle = cell.tone === "white" ? "#b9c5d3" : "rgba(44, 62, 80, 0.28)";
+  context.lineWidth = 1.5;
   context.fillRect(x, y, width, height);
-  context.strokeRect(x + 0.5, y + 0.5, Math.max(0, width - 1), Math.max(0, height - 1));
+  context.strokeRect(x + 0.75, y + 0.75, Math.max(0, width - 1.5), Math.max(0, height - 1.5));
 
   if (isHovered && cell.tone === "white") {
     context.fillStyle = "rgba(26, 115, 232, 0.05)";
@@ -550,10 +589,6 @@ function smoothPulse(value: number, fadeInStart: number, peakStart: number, fade
 }
 
 function clampNumber(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function clampCanvasNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
