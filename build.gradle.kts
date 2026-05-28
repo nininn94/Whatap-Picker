@@ -1,7 +1,7 @@
 plugins {
     java
-    id("org.springframework.boot") version "4.0.0"
-    id("io.spring.dependency-management") version "1.1.7"
+    id("org.springframework.boot") version "3.4.0"
+    id("io.spring.dependency-management") version "1.1.6"
 }
 
 group = "io.whatap"
@@ -32,7 +32,6 @@ dependencies {
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-database-postgresql")
     runtimeOnly("org.postgresql:postgresql")
-    implementation("io.hypersistence:hypersistence-utils-hibernate-63:3.10.4")
 
     // Security + JWT
     implementation("org.springframework.boot:spring-boot-starter-security")
