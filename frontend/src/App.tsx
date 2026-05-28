@@ -1,7 +1,7 @@
 "use client";
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
-import { ArrowRight, CheckCircle2, Phone, UserRound } from "lucide-react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { ArrowRight, Phone, RotateCcw, UserRound } from "lucide-react";
 import {
   PICK_REVEAL_DURATION_MS,
   PickerCanvas,
@@ -13,6 +13,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  DrawApiError,
+  drawPrize,
+  fetchDrawHistory,
+  fetchPrizeInventory,
+  searchLeads,
+  type ApiPrize,
+  type DrawResponse,
+  type LeadSearchItem,
+} from "@/lib/draw-api";
 
 const STORAGE_KEY = "whatap-picker-display-v8";
 const BOARD_COLUMNS = 50;
@@ -53,12 +63,22 @@ type ParticipantForm = {
 };
 
 type Participant = {
-  lastName: string;
-  firstName: string;
+  leadId?: string;
+  name: string;
   phoneLastFour: string;
+  eventCode?: string;
+  eventDate?: string;
+  company?: string;
+  jobLevel?: string;
+  aiStatus?: LeadSearchItem["aiStatus"];
+  grade?: LeadSearchItem["grade"];
+  score?: LeadSearchItem["score"];
 };
 
-type MockTestPrize = Pick<Prize, "rank" | "name">;
+type LeadOption = LeadSearchItem & {
+  eventCode: string;
+  eventDate: string;
+};
 
 const defaultPrizes: Prize[] = [
   { rank: "1등", name: "프리미엄 굿즈", count: 10 },
@@ -68,32 +88,32 @@ const defaultPrizes: Prize[] = [
   { rank: "5등", name: "참가 기념품", count: 200 },
 ];
 
-const mockTestPrizes: MockTestPrize[] = [
-  { rank: "1등", name: "Mock 프리미엄 굿즈" },
-  { rank: "2등", name: "Mock 텀블러" },
-  { rank: "3등", name: "Mock 스티커팩" },
-  { rank: "4등", name: "Mock 쿠폰" },
-  { rank: "5등", name: "Mock 참가 기념품" },
-];
-
-const defaultState: PickerState = {
-  eventTitle: "Whatap 경품 뽑기",
-  prizes: defaultPrizes,
-  cells: buildCells(defaultPrizes),
-  results: [],
-};
+function createDefaultState(): PickerState {
+  return {
+    eventTitle: "Whatap 경품 뽑기",
+    prizes: defaultPrizes,
+    cells: buildCells(defaultPrizes),
+    results: [],
+  };
+}
 
 export default function App() {
   const [state, setState] = useState<PickerState>(() => loadState());
+  const [eventCode, setEventCode] = useState("");
+  const [prizeInventory, setPrizeInventory] = useState<ApiPrize[]>([]);
+  const [isLoadingPrizes, setIsLoadingPrizes] = useState(false);
+  const [prizeError, setPrizeError] = useState("");
   const [participantForm, setParticipantForm] = useState<ParticipantForm>({
     lastName: "",
     firstName: "",
     phoneLastFour: "",
   });
   const [participant, setParticipant] = useState<Participant | null>(null);
+  const [leadOptions, setLeadOptions] = useState<LeadOption[]>([]);
   const [isTestMode, setIsTestMode] = useState(false);
   const [participantError, setParticipantError] = useState("");
   const [isCheckingParticipant, setIsCheckingParticipant] = useState(false);
+  const [drawError, setDrawError] = useState("");
   const [selectedResult, setSelectedResult] = useState<PickResult | null>(null);
   const [activePickKey, setActivePickKey] = useState<string | null>(null);
   const [isRevealing, setIsRevealing] = useState(false);
@@ -101,6 +121,38 @@ export default function App() {
   const revealTimerRef = useRef<number | null>(null);
   const resultTimerRef = useRef<number | null>(null);
   const drawEffectRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const timerId = window.setTimeout(() => {
+      setEventCode(readEventCode());
+    }, 0);
+
+    return () => window.clearTimeout(timerId);
+  }, []);
+
+  const loadPrizeInventory = useCallback(async (nextEventCode: string) => {
+    setIsLoadingPrizes(true);
+    setPrizeError("");
+
+    try {
+      const response = await fetchPrizeInventory(nextEventCode);
+      setPrizeInventory(response.prizes);
+    } catch (error) {
+      setPrizeInventory([]);
+      setPrizeError(apiErrorMessage(error, "경품 재고를 불러오지 못했습니다."));
+    } finally {
+      setIsLoadingPrizes(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!eventCode) return;
+    const timerId = window.setTimeout(() => {
+      void loadPrizeInventory(eventCode);
+    }, 0);
+
+    return () => window.clearTimeout(timerId);
+  }, [eventCode, loadPrizeInventory]);
 
   useEffect(() => {
     return () => {
@@ -128,10 +180,26 @@ export default function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
   }
 
+  function resetPickedState() {
+    clearRevealTimer();
+    if (resultTimerRef.current !== null) {
+      window.clearTimeout(resultTimerRef.current);
+      resultTimerRef.current = null;
+    }
+
+    const nextState = createDefaultState();
+    setState(nextState);
+    localStorage.removeItem(STORAGE_KEY);
+    setDrawError("");
+    setSelectedResult(null);
+    setActivePickKey(null);
+    setIsRevealing(false);
+  }
+
   async function submitParticipant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const nextParticipant: Participant = {
+    const nextParticipant: ParticipantForm = {
       lastName: participantForm.lastName.trim(),
       firstName: participantForm.firstName.trim(),
       phoneLastFour: digitsOnly(participantForm.phoneLastFour).slice(0, 4),
@@ -142,24 +210,61 @@ export default function App() {
       return;
     }
 
+    if (!eventCode) {
+      setParticipantError("URL에 eventCode 파라미터가 필요합니다.");
+      return;
+    }
+
     if (isMockTestParticipant(nextParticipant)) {
       setIsTestMode(true);
-      setParticipant(nextParticipant);
+      setParticipant({
+        leadId: "mock-lead-whatap-1111",
+        name: participantFormFullName(nextParticipant),
+        phoneLastFour: nextParticipant.phoneLastFour,
+        eventCode,
+        eventDate: todayDateString(),
+        company: "Mock Company",
+        jobLevel: "MOCK",
+        aiStatus: "DONE",
+        grade: "A",
+        score: 100,
+      });
       return;
     }
 
     setParticipantError("");
+    setLeadOptions([]);
     setIsCheckingParticipant(true);
 
-    const isSurveyParticipant = await verifyParticipant(nextParticipant);
-    setIsCheckingParticipant(false);
+    try {
+      const response = await searchLeads({
+        name: participantFormFullName(nextParticipant),
+        phoneLast4: nextParticipant.phoneLastFour,
+        eventCode,
+      });
 
-    if (!isSurveyParticipant) {
-      setParticipantError("설문 제출 내역을 찾을 수 없습니다.");
-      return;
+      const options = response.results.map((lead) => ({
+        ...lead,
+        eventCode: response.eventCode,
+        eventDate: response.eventDate,
+      }));
+
+      if (options.length === 0) {
+        setParticipantError("설문 제출 내역을 찾을 수 없습니다.");
+        return;
+      }
+
+      if (options.length > 1) {
+        setLeadOptions(options);
+        return;
+      }
+
+      await selectLeadOption(options[0]);
+    } catch (error) {
+      setParticipantError(apiErrorMessage(error, "참여자 검색 중 오류가 발생했습니다."));
+    } finally {
+      setIsCheckingParticipant(false);
     }
-
-    setParticipant(nextParticipant);
   }
 
   function updateParticipantField(field: keyof ParticipantForm, value: string) {
@@ -168,6 +273,45 @@ export default function App() {
 
     if (participantError) {
       setParticipantError("");
+    }
+
+    if (leadOptions.length > 0) {
+      setLeadOptions([]);
+    }
+  }
+
+  async function selectLeadOption(lead: LeadOption) {
+    setLeadOptions([]);
+
+    if (lead.drawn) {
+      await showAlreadyDrawnMessage(lead);
+      return;
+    }
+
+    setParticipant({
+      leadId: lead.leadId,
+      name: lead.name,
+      phoneLastFour: digitsOnly(participantForm.phoneLastFour).slice(0, 4),
+      eventCode: lead.eventCode,
+      eventDate: lead.eventDate,
+      company: lead.company,
+      jobLevel: lead.jobLevel,
+      aiStatus: lead.aiStatus,
+      grade: lead.grade,
+      score: lead.score,
+    });
+    setDrawError("");
+  }
+
+  async function showAlreadyDrawnMessage(lead: LeadOption) {
+    try {
+      const history = await fetchDrawHistory({
+        leadId: lead.leadId,
+        eventCode: lead.eventCode,
+      });
+      setParticipantError(`이미 추첨 완료된 참여자입니다. 결과: ${drawResponseLabel(history)}`);
+    } catch {
+      setParticipantError("이미 추첨 완료된 참여자입니다.");
     }
   }
 
@@ -193,6 +337,7 @@ export default function App() {
     });
     setParticipantError("");
     setConfettiTrigger(0);
+    setDrawError("");
   }
 
   function showResult(result: PickResult) {
@@ -218,51 +363,25 @@ export default function App() {
     }
   }
 
-  function selectMockPrize(prize: MockTestPrize) {
-    if (!participant || !isTestMode || isRevealing) return;
-
-    const result: PickResult = {
-      id: `mock-${prize.rank}`,
-      cellNumber: 0,
-      rank: prize.rank,
-      name: prize.name,
-      pickedAt: new Date().toLocaleString("ko-KR"),
-      participantName: participantFullName(participant),
-      participantPhoneLastFour: participant.phoneLastFour,
-      isMock: true,
-    };
-
-    setActivePickKey(result.id);
-    setIsRevealing(true);
-    clearRevealTimer();
-
-    revealTimerRef.current = window.setTimeout(() => {
-      showResult(result);
-      setIsRevealing(false);
-      setActivePickKey(null);
-      revealTimerRef.current = null;
-    }, PICK_REVEAL_DURATION_MS);
-  }
-
-  function pickCell(index: number) {
+  function pickMockCell(index: number, currentParticipant: Participant) {
     const cell = state.cells[index];
-    if (!cell || cell.picked || isRevealing || !participant) return;
+    if (!cell || cell.picked || isRevealing) return;
 
-    const pickedAt = new Date().toLocaleString("ko-KR");
     const result: PickResult = {
-      id: cell.id,
+      id: `${cell.id}-mock-${Date.now()}`,
       cellNumber: index + 1,
       rank: cell.rank,
       name: cell.name,
-      pickedAt,
-      participantName: participantFullName(participant),
-      participantPhoneLastFour: participant.phoneLastFour,
+      pickedAt: new Date().toLocaleString("ko-KR"),
+      participantName: participantFullName(currentParticipant),
+      participantPhoneLastFour: currentParticipant.phoneLastFour,
+      isMock: true,
     };
     const nextCells = state.cells.map((item, cellIndex) =>
       cellIndex === index ? { ...item, picked: true } : item,
     );
 
-    setActivePickKey(cell.id);
+    setActivePickKey(result.id);
     setIsRevealing(true);
     clearRevealTimer();
 
@@ -279,10 +398,94 @@ export default function App() {
     }, PICK_REVEAL_DURATION_MS);
   }
 
+  async function pickCell(index: number) {
+    const cell = state.cells[index];
+    if (!cell || cell.picked || isRevealing || !participant) return;
+
+    if (isTestMode) {
+      pickMockCell(index, participant);
+      return;
+    }
+
+    if (!participant.leadId || !participant.eventDate || !participant.eventCode) {
+      setDrawError("참여자 정보가 올바르지 않습니다. 다시 검색해 주세요.");
+      return;
+    }
+
+    setDrawError("");
+    setActivePickKey(cell.id);
+    setIsRevealing(true);
+    clearRevealTimer();
+
+    const startedAt = window.performance.now();
+
+    try {
+      const response = await drawPrize({
+        leadId: participant.leadId,
+        eventDate: participant.eventDate,
+      });
+      const result = pickResultFromDrawResponse(response, cell.id, index + 1, participant);
+      const nextCells = state.cells.map((item, cellIndex) =>
+        cellIndex === index ? { ...item, picked: true, rank: result.rank, name: result.name } : item,
+      );
+      const remainingRevealMs = Math.max(0, PICK_REVEAL_DURATION_MS - (window.performance.now() - startedAt));
+
+      revealTimerRef.current = window.setTimeout(() => {
+        updateState({
+          ...state,
+          cells: nextCells,
+          results: [result, ...state.results],
+        });
+        showResult(result);
+        setIsRevealing(false);
+        setActivePickKey(null);
+        revealTimerRef.current = null;
+        void loadPrizeInventory(participant.eventCode || eventCode);
+      }, remainingRevealMs);
+    } catch (error) {
+      if (error instanceof DrawApiError && error.code === "ALREADY_DRAWN") {
+        await showExistingDrawResult(cell.id, index + 1, participant);
+        return;
+      }
+
+      setIsRevealing(false);
+      setActivePickKey(null);
+      setDrawError(apiErrorMessage(error, "뽑기를 실행하지 못했습니다."));
+    }
+  }
+
+  async function showExistingDrawResult(cellId: string, cellNumber: number, currentParticipant: Participant) {
+    if (!currentParticipant.leadId || !currentParticipant.eventCode) return;
+
+    try {
+      const response = await fetchDrawHistory({
+        leadId: currentParticipant.leadId,
+        eventCode: currentParticipant.eventCode,
+      });
+      const result = pickResultFromDrawResponse(response, cellId, cellNumber, currentParticipant);
+
+      updateState({
+        ...state,
+        cells: state.cells,
+        results: [result, ...state.results],
+      });
+      showResult(result);
+      setIsRevealing(false);
+      setActivePickKey(null);
+      setDrawError("이미 추첨 완료된 참여자입니다. 기존 결과를 표시합니다.");
+    } catch (error) {
+      setIsRevealing(false);
+      setActivePickKey(null);
+      setDrawError(apiErrorMessage(error, "이미 추첨된 결과를 불러오지 못했습니다."));
+    }
+  }
+
+  const prizeStatus = prizeInventoryStatus(prizeInventory, isLoadingPrizes, prizeError);
+
   const resultOverlay = selectedResult ? (
     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center">
-      <div className="select-none rounded-2xl px-10 py-8 text-center shadow-2xl flex flex-col items-center gap-6" style={{ backgroundColor: "#1a4db5" }}>
-        <div className="text-[96px] font-black leading-none text-white sm:text-[132px]">
+      <div className="flex select-none flex-col items-center gap-6 rounded-2xl px-10 py-8 text-center shadow-2xl" style={{ backgroundColor: "#1a4db5" }}>
+        <div className="text-[96px] font-black leading-none text-white sm:text-[132px]" data-testid="draw-result-rank">
           {selectedResult.rank}
         </div>
         {!selectedResult.isMock && (
@@ -329,8 +532,18 @@ export default function App() {
             onSubmit={submitParticipant}
           >
             <div className="mb-6">
-              <Badge className="mb-3 px-3 py-1 text-sm">와탭 뽑기 이벤트</Badge>
+              <div className="mb-3 flex flex-wrap gap-2">
+                <Badge className="px-3 py-1 text-sm">와탭 뽑기 이벤트</Badge>
+                {eventCode ? (
+                  <Badge variant="secondary" className="max-w-full px-3 py-1 text-sm">
+                    {eventCode}
+                  </Badge>
+                ) : null}
+              </div>
               <h1 className="text-2xl font-bold tracking-normal text-foreground">제출하신 설문 정보를 입력해 주세요.</h1>
+              {prizeStatus ? (
+                <p className="mt-2 text-sm font-medium text-muted-foreground">{prizeStatus}</p>
+              ) : null}
             </div>
 
             <div className="space-y-5">
@@ -390,8 +603,37 @@ export default function App() {
             {participantError ? (
               <p className="mt-4 text-sm font-medium text-destructive">{participantError}</p>
             ) : null}
+            {!eventCode ? (
+              <p className="mt-4 text-sm font-medium text-destructive">
+                URL에 eventCode 파라미터가 필요합니다.
+              </p>
+            ) : null}
 
-            <Button type="submit" className="mt-6 h-12 w-full gap-2 text-base" disabled={isCheckingParticipant}>
+            {leadOptions.length > 0 ? (
+              <div className="mt-4 space-y-2">
+                {leadOptions.map((lead) => (
+                  <Button
+                    key={lead.leadId}
+                    type="button"
+                    variant="outline"
+                    className="h-auto w-full justify-between gap-3 px-4 py-3 text-left"
+                    onClick={() => void selectLeadOption(lead)}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate font-semibold">{lead.name}</span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {lead.company} · {lead.jobLevel}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {lead.drawn ? "추첨 완료" : lead.grade ? `${lead.grade} · ${lead.score ?? "-"}점` : lead.aiStatus}
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+
+            <Button type="submit" className="mt-6 h-12 w-full gap-2 text-base" disabled={isCheckingParticipant || !eventCode}>
               {isCheckingParticipant ? "확인 중" : "이벤트 참여하기"}
               <ArrowRight className="size-4" aria-hidden="true" />
             </Button>
@@ -473,7 +715,13 @@ export default function App() {
   return (
     <main className="flex h-screen min-h-screen flex-col overflow-hidden bg-background px-5 pb-5 pt-4">
       <header className="flex h-[92px] shrink-0 items-center justify-between gap-4">
-        <div className="w-[180px]" aria-hidden="true" />
+        <div className="flex w-[180px] justify-start">
+          {prizeStatus ? (
+            <Badge variant="outline" className="max-w-full truncate px-3 py-1 text-sm">
+              {prizeStatus}
+            </Badge>
+          ) : null}
+        </div>
         <img
           src="/WhaTap_basic_logo.png"
           alt="WhaTap"
@@ -496,6 +744,11 @@ export default function App() {
             isRevealing={isRevealing}
             onPick={pickCell}
           />
+          {drawError ? (
+            <div className="absolute left-4 top-4 z-20 max-w-[420px] rounded-md border border-destructive/30 bg-background/95 px-4 py-2 text-sm font-medium text-destructive shadow-sm">
+              {drawError}
+            </div>
+          ) : null}
           {drawEffect}
           {resultOverlay}
           <Confetti key={confettiTrigger} active={confettiTrigger > 0} />
@@ -505,20 +758,79 @@ export default function App() {
   );
 }
 
-function isMockTestParticipant(participant: Participant) {
+function isMockTestParticipant(participant: ParticipantForm) {
   return (
-    participantFullName(participant).toLowerCase() === TEST_PARTICIPANT_NAME &&
+    participantFormFullName(participant).toLowerCase() === TEST_PARTICIPANT_NAME &&
     participant.phoneLastFour === TEST_PARTICIPANT_PHONE_LAST_FOUR
   );
 }
 
 function participantFullName(participant: Participant) {
+  return participant.name;
+}
+
+function participantFormFullName(participant: ParticipantForm) {
   return `${participant.lastName}${participant.firstName}`;
 }
 
-async function verifyParticipant(participant: Participant) {
-  void participant;
-  return true;
+function pickResultFromDrawResponse(
+  response: DrawResponse,
+  cellId: string,
+  cellNumber: number,
+  participant: Participant,
+): PickResult {
+  const isOutOfStock = response.outOfStock === true || response.rank === null;
+
+  return {
+    id: `${cellId}-${response.drawnAt}`,
+    cellNumber,
+    rank: isOutOfStock ? "꽝" : `${response.rank}등`,
+    name: response.prizeName || "경품 소진",
+    pickedAt: formatDateTime(response.drawnAt),
+    participantName: participantFullName(participant),
+    participantPhoneLastFour: participant.phoneLastFour,
+  };
+}
+
+function drawResponseLabel(response: DrawResponse) {
+  if (response.outOfStock || response.rank === null) {
+    return "꽝";
+  }
+
+  return `${response.rank}등 · ${response.prizeName || "경품"}`;
+}
+
+function prizeInventoryStatus(prizes: ApiPrize[], isLoading: boolean, error: string) {
+  if (isLoading) return "재고 확인 중";
+  if (error) return error;
+  if (prizes.length === 0) return "";
+
+  const initial = prizes.reduce((sum, prize) => sum + safeCount(prize.initial), 0);
+  const remaining = prizes.reduce((sum, prize) => sum + safeCount(prize.remaining), 0);
+  return `잔여 ${remaining}/${initial}`;
+}
+
+function apiErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof DrawApiError) {
+    return error.message;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("ko-KR");
+}
+
+function readEventCode() {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get("eventCode")?.trim() || "";
 }
 
 function digitsOnly(value: string) {
@@ -526,6 +838,8 @@ function digitsOnly(value: string) {
 }
 
 function loadState(): PickerState {
+  if (typeof window === "undefined") return defaultState;
+
   const saved = localStorage.getItem(STORAGE_KEY);
   if (!saved) return defaultState;
 

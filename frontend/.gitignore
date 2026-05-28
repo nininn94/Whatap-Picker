@@ -3,3 +3,5 @@ dist
 .next
 .vite
 *.tsbuildinfo
+playwright-report
+test-results

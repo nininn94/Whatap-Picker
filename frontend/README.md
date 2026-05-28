@@ -24,9 +24,12 @@ npm run dev -- -p 4173
 ## 검증
 
 ```bash
-npm run typecheck
 npm run lint
+npm run typecheck
+npm run test:unit
+npm run test:e2e
 npm run build
+npm run verify
 ```
 
 ## 기능
