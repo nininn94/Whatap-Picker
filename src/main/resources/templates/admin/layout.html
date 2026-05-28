@@ -12,16 +12,25 @@
     <a th:href="@{/admin}" class="logo">WhaTap Picker</a>
     <ul>
         <li><a th:href="@{/admin/events}">행사</a></li>
-        <li><a th:href="@{/admin/events}">경품</a></li>
         <li><a th:href="@{/admin/leads}">리드</a></li>
         <li><a th:href="@{/admin/forms}">폼</a></li>
         <li><a th:href="@{/admin/dashboard}">대시보드</a></li>
     </ul>
+    <button type="button" onclick="adminLogout()" class="btn btn-secondary" style="margin-left:auto;">로그아웃</button>
 </nav>
 <div th:fragment="scripts">
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
     <script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script>
+        function adminLogout() {
+            fetch('/api/auth/logout', { method:'POST', credentials:'same-origin' })
+                .finally(() => {
+                    localStorage.removeItem('jwt');
+                    window.location.href = '/admin/login';
+                });
+        }
+    </script>
 </div>
 </body>
 </html>

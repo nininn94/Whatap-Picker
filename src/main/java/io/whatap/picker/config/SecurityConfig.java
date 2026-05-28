@@ -37,11 +37,13 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // 공개 — 부스 운영자가 별도 로그인 없이 사용 (기획서 운영자 흐름)
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/logout").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/leads").permitAll()
                         .requestMatchers(HttpMethod.GET,  "/api/leads/search").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/draw").permitAll()
                         .requestMatchers(HttpMethod.GET,  "/api/draw/history").permitAll()
                         .requestMatchers(HttpMethod.GET,  "/api/prizes").permitAll()
+                        .requestMatchers("/admin/login", "/admin/login/**").permitAll()
                         .requestMatchers("/survey/**", "/event/**", "/").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/actuator/health").permitAll()
                         .requestMatchers("/css/**", "/js/**", "/images/**", "/favicon.ico").permitAll()
@@ -50,6 +52,14 @@ public class SecurityConfig {
                         // 그 외 인증 필요
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().authenticated()
+                )
+                .exceptionHandling(ex -> ex
+                        .defaultAuthenticationEntryPointFor(
+                                new org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint("/admin/login"),
+                                new org.springframework.security.web.util.matcher.AntPathRequestMatcher("/admin/**"))
+                        .defaultAuthenticationEntryPointFor(
+                                new org.springframework.security.web.authentication.HttpStatusEntryPoint(org.springframework.http.HttpStatus.UNAUTHORIZED),
+                                new org.springframework.security.web.util.matcher.AntPathRequestMatcher("/api/**"))
                 )
                 .addFilterBefore(new JwtAuthenticationFilter(tokenProvider),
                                  UsernamePasswordAuthenticationFilter.class);

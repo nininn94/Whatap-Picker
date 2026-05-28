@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head(title='어드민 로그인')}"></head>
+<body>
+<main class="admin-container" style="max-width: 400px; margin-top: 80px;">
+    <div class="card">
+        <h1>WhaTap Picker 어드민</h1>
+        <p class="muted">계정 정보를 입력해 주세요.</p>
+
+        <form id="login-form" onsubmit="return submitLogin(event)" style="display:flex; flex-direction:column; gap:12px;">
+            <label>
+                <span style="display:block; font-weight:600; margin-bottom:4px;">아이디</span>
+                <input type="text" name="username" required autocomplete="username"
+                       style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:6px;">
+            </label>
+            <label>
+                <span style="display:block; font-weight:600; margin-bottom:4px;">비밀번호</span>
+                <input type="password" name="password" required autocomplete="current-password"
+                       style="width:100%; padding:10px; border:1px solid #d1d5db; border-radius:6px;">
+            </label>
+            <button type="submit" class="btn btn-primary">로그인</button>
+            <p id="login-error" class="error" style="display:none;"></p>
+        </form>
+    </div>
+</main>
+<script>
+    async function submitLogin(e) {
+        e.preventDefault();
+        const form = e.target;
+        const data = {
+            username: form.username.value,
+            password: form.password.value
+        };
+        const err = document.getElementById('login-error');
+        err.style.display = 'none';
+        try {
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify(data)
+            });
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({ message: '로그인 실패' }));
+                err.textContent = body.message || '로그인 실패';
+                err.style.display = 'block';
+                return false;
+            }
+            const json = await res.json();
+            // 헤더 인증을 위한 보조 저장 (어드민 페이지 fetch 호출에서 사용)
+            localStorage.setItem('jwt', json.accessToken);
+            const params = new URLSearchParams(window.location.search);
+            const next = params.get('next') || '/admin';
+            window.location.href = next;
+            return false;
+        } catch (ex) {
+            err.textContent = '네트워크 오류';
+            err.style.display = 'block';
+            return false;
+        }
+    }
+</script>
+<div th:replace="~{admin/layout :: scripts}"></div>
+</body>
+</html>
