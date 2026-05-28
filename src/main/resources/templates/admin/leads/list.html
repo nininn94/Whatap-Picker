@@ -56,7 +56,8 @@
             <label>Lifecycle Stage
                 <select id="f-grade">
                     <option value="">전체</option>
-                    <option value="A">A</option><option value="B">B</option><option value="C">C</option>
+                    <option value="MQL">MQL</option>
+                    <option value="KNOWN_LEAD">Known Lead</option>
                 </select>
             </label>
         </div>
@@ -220,16 +221,16 @@
         return str.length > n ? `<span title="${str.replace(/"/g,'&quot;')}">${str.slice(0, n)}…</span>` : str;
     }
 
+    const STAGE_LABEL = { MQL: 'MQL', KNOWN_LEAD: 'Known Lead' };
     function gradeBadge(l) {
-        if (l.grade) return `<span class="grade-${l.grade}">${l.grade}</span>`;
+        if (l.grade) return `<span class="grade-${l.grade}">${STAGE_LABEL[l.grade] || l.grade}</span>`;
         if (l.aiStatus === 'PENDING') return '<span class="grade-PENDING">분석중</span>';
         if (l.aiStatus === 'FAILED')  return '<span class="grade-PENDING" style="background:#dc2626;">실패</span>';
         return '<span class="muted">-</span>';
     }
     function rowStripClass(l) {
-        if (l.grade === 'A') return 'lead-stripe-A';
-        if (l.grade === 'B') return 'lead-stripe-B';
-        if (l.grade === 'C') return 'lead-stripe-C';
+        if (l.grade === 'MQL')        return 'lead-stripe-MQL';
+        if (l.grade === 'KNOWN_LEAD') return 'lead-stripe-KNOWN';
         return 'lead-stripe-none';
     }
 
@@ -314,12 +315,11 @@
 
     function renderKpi(distribution, total, consult) {
         const cards = [
-            { key:'all',     label:'전체',           value: total,                  cls:'kpi-total',   filter: {} },
-            { key:'A',       label:'Stage A',        value: distribution.A ?? 0,    cls:'kpi-A',       filter:{grade:'A'} },
-            { key:'B',       label:'Stage B',        value: distribution.B ?? 0,    cls:'kpi-B',       filter:{grade:'B'} },
-            { key:'C',       label:'Stage C',        value: distribution.C ?? 0,    cls:'kpi-C',       filter:{grade:'C'} },
-            { key:'pending', label:'분석중/실패',     value: distribution.PENDING ?? 0, cls:'kpi-pending', filter:null },
-            { key:'consult', label:'상담 희망',       value: consult,                cls:'kpi-consult', filter:null }
+            { label:'전체',         value: total,                       cls:'kpi-total',   filter:{} },
+            { label:'MQL',          value: distribution.MQL ?? 0,       cls:'kpi-MQL',     filter:{grade:'MQL'} },
+            { label:'Known Lead',   value: distribution.KNOWN_LEAD ?? 0,cls:'kpi-KNOWN',   filter:{grade:'KNOWN_LEAD'} },
+            { label:'분석중/실패',   value: distribution.PENDING ?? 0,   cls:'kpi-pending', filter:null },
+            { label:'상담 희망',     value: consult,                    cls:'kpi-consult', filter:null }
         ];
         document.getElementById('kpi-strip').innerHTML = cards.map(c => `
             <button type="button" class="kpi-card ${c.cls}" ${c.filter ? `onclick='applyKpiFilter(${JSON.stringify(c.filter)})'` : ''}>
@@ -340,10 +340,11 @@
             params.set('page', '0');
             const r = await adminApi.get('/api/admin/leads?' + params);
             const list = r.content || [];
-            const dist = { A:0, B:0, C:0, PENDING:0 };
+            const dist = { MQL:0, KNOWN_LEAD:0, PENDING:0 };
             let consult = 0;
             for (const l of list) {
-                if (l.grade) dist[l.grade] = (dist[l.grade] || 0) + 1;
+                if (l.grade && dist[l.grade] !== undefined) dist[l.grade]++;
+                else if (l.grade) dist.PENDING++;  // 미지의 값은 PENDING 으로
                 else dist.PENDING++;
                 if (l.consultationPreference) consult++;
             }
@@ -458,9 +459,9 @@
             seg['1년 계획']     = groupBy('planWithinYear');
             seg['상담희망']     = groupBy('consultationPreference');
 
-            const gradeDist = { A:0,B:0,C:0,PENDING:0 };
+            const gradeDist = { MQL:0, KNOWN_LEAD:0, PENDING:0 };
             for (const l of list) {
-                if (l.grade) gradeDist[l.grade] = (gradeDist[l.grade] || 0) + 1;
+                if (l.grade && gradeDist[l.grade] !== undefined) gradeDist[l.grade]++;
                 else gradeDist.PENDING++;
             }
 

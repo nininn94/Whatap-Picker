@@ -118,7 +118,11 @@ public class LlmGateway {
 
     private static Grade parseGrade(String s) {
         if (s == null) return null;
-        try { return Grade.valueOf(s.trim().toUpperCase()); } catch (Exception e) { return null; }
+        String u = s.trim().toUpperCase();
+        // 과거 프롬프트가 A/B/C 를 반환할 수 있어 호환 매핑.
+        if ("A".equals(u) || "B".equals(u)) return Grade.MQL;
+        if ("C".equals(u)) return Grade.KNOWN_LEAD;
+        try { return Grade.valueOf(u); } catch (Exception e) { return null; }
     }
 
     private static NextAction parseNextAction(String s) {

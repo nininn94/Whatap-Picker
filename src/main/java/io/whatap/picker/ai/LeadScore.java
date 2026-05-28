@@ -28,7 +28,7 @@ public class LeadScore {
     private AiStatus aiStatus = AiStatus.PENDING;
 
     @Enumerated(EnumType.STRING)
-    @Column(columnDefinition = "varchar(1)")
+    @Column(columnDefinition = "varchar(20)")
     private Grade grade;
 
     private Short score;

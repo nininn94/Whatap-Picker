@@ -26,7 +26,7 @@ public class RuleEngine {
         // 1. STUDENT_AUTO_C
         if (lead.getJobFunction() == JobFunction.STUDENT_FREELANCER) {
             hits.add("STUDENT_AUTO_C");
-            return RuleOutcome.terminal(Grade.C, 20, NextAction.NURTURE_NEWSLETTER,
+            return RuleOutcome.terminal(Grade.KNOWN_LEAD, 20, NextAction.NURTURE_NEWSLETTER,
                     "학생/프리랜서 - 후속 nurture 대상", hits);
         }
 
@@ -34,7 +34,7 @@ public class RuleEngine {
         if (in(lead.getJobLevel(), JobLevel.TOP_EXECUTIVE, JobLevel.SENIOR_MGR)
                 && in(lead.getPlanWithinYear(), PlanWithinYear.C_REPLACE, PlanWithinYear.D_NEW_ADOPT)) {
             hits.add("EXEC_REPLACE_AUTO_A");
-            return RuleOutcome.terminal(Grade.A, 90, NextAction.MEETING_PROPOSAL_24H,
+            return RuleOutcome.terminal(Grade.MQL, 90, NextAction.MEETING_PROPOSAL_24H,
                     "결정권자 + 명확한 교체/도입 계획", hits);
         }
 
@@ -42,7 +42,7 @@ public class RuleEngine {
         if (lead.getJobLevel() == JobLevel.TOP_EXECUTIVE
                 && lead.getConsultationPreference() == ConsultationPreference.ONSITE_MEETING) {
             hits.add("EXEC_ONSITE_AUTO_A");
-            return RuleOutcome.terminal(Grade.A, 85, NextAction.MEETING_PROPOSAL_24H,
+            return RuleOutcome.terminal(Grade.MQL, 85, NextAction.MEETING_PROPOSAL_24H,
                     "결정권자가 방문 미팅을 직접 요청", hits);
         }
 
@@ -51,7 +51,7 @@ public class RuleEngine {
                 && lead.getPlanWithinYear() == PlanWithinYear.C_REPLACE
                 && lead.getConsultationPreference() == ConsultationPreference.ONSITE_MEETING) {
             hits.add("MGR_REPLACE_AUTO_A");
-            return RuleOutcome.terminal(Grade.A, 82, NextAction.MEETING_PROPOSAL_WEEK,
+            return RuleOutcome.terminal(Grade.MQL, 82, NextAction.MEETING_PROPOSAL_WEEK,
                     "중간 관리자 + 교체 계획 + 방문 희망", hits);
         }
 
@@ -60,7 +60,7 @@ public class RuleEngine {
         if (("DISSATISFIED".equals(satisfaction) || "VERY_DISSATISFIED".equals(satisfaction))
                 && in(lead.getPlanWithinYear(), PlanWithinYear.C_REPLACE, PlanWithinYear.D_NEW_ADOPT)) {
             hits.add("DISSATISFIED_REPLACE_AUTO_A");
-            return RuleOutcome.terminal(Grade.A, 80, NextAction.MEETING_PROPOSAL_WEEK,
+            return RuleOutcome.terminal(Grade.MQL, 80, NextAction.MEETING_PROPOSAL_WEEK,
                     "현재 솔루션 불만 + 교체 계획", hits);
         }
 
@@ -69,7 +69,7 @@ public class RuleEngine {
                 && lead.getPlanWithinYear() == PlanWithinYear.A_OPEN
                 && lead.getConsultationPreference() == ConsultationPreference.EMAIL_OR_PHONE) {
             hits.add("STAFF_NO_PLAN_AUTO_C");
-            return RuleOutcome.terminal(Grade.C, 30, NextAction.NURTURE_NEWSLETTER,
+            return RuleOutcome.terminal(Grade.KNOWN_LEAD, 30, NextAction.NURTURE_NEWSLETTER,
                     "실무자 + 검토 단계, 메일만 희망", hits);
         }
 
@@ -77,7 +77,7 @@ public class RuleEngine {
         if (lead.getPlanWithinYear() == PlanWithinYear.B_EXPAND
                 && in(lead.getJobLevel(), JobLevel.SENIOR_MGR, JobLevel.MID_MGR)) {
             hits.add("EXPAND_PLAN_AUTO_B");
-            return RuleOutcome.terminal(Grade.B, 65, NextAction.PRODUCT_INTRO_EMAIL,
+            return RuleOutcome.terminal(Grade.MQL, 65, NextAction.PRODUCT_INTRO_EMAIL,
                     "관리자급 + 확장 도입 계획", hits);
         }
 
@@ -85,7 +85,7 @@ public class RuleEngine {
         if ((lead.getInterestProducts() == null || lead.getInterestProducts().isEmpty())
                 && lead.getPlanWithinYear() == PlanWithinYear.A_OPEN) {
             hits.add("NO_INTEREST_AUTO_C");
-            return RuleOutcome.terminal(Grade.C, 25, NextAction.NURTURE_NEWSLETTER,
+            return RuleOutcome.terminal(Grade.KNOWN_LEAD, 25, NextAction.NURTURE_NEWSLETTER,
                     "관심 제품 없음 + 검토 단계", hits);
         }
 

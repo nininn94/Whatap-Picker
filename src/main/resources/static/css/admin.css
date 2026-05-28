@@ -257,14 +257,18 @@ table input[type=text], table input[type=number] {
 .status-CLOSED   { background: #fee2e2; color: #991b1b; }
 .status-ARCHIVED { background: #e5e7eb; color: #6b7280; }
 
-.grade-A, .grade-B, .grade-C, .grade-PENDING {
+.grade-MQL, .grade-KNOWN_LEAD, .grade-PENDING,
+.grade-A, .grade-B, .grade-C {
     display: inline-block; padding: 2px 9px; border-radius: 6px;
     font-weight: 700; font-size: 0.78rem; color: #fff;
 }
+.grade-MQL        { background: var(--success); }
+.grade-KNOWN_LEAD { background: #64748b; }
+.grade-PENDING    { background: var(--warning); }
+/* 구 클래스 (마이그레이션 전 캐시된 페이지 호환용) */
 .grade-A { background: var(--success); }
 .grade-B { background: var(--brand); }
 .grade-C { background: #64748b; }
-.grade-PENDING { background: var(--warning); }
 
 /* ──────────────────  대시보드 카드  ────────────────── */
 .dashboard-grid {
@@ -453,6 +457,11 @@ pre.code-block {
                        text-transform: uppercase; letter-spacing: .04em; }
 .kpi-card .kpi-value { font-size: 1.7rem; font-weight: 700; line-height: 1.1; }
 .kpi-card.kpi-total   { border-left: 4px solid var(--brand); }
+.kpi-card.kpi-MQL     { border-left: 4px solid var(--success); }
+.kpi-card.kpi-MQL .kpi-value { color: var(--success); }
+.kpi-card.kpi-KNOWN   { border-left: 4px solid #64748b; }
+.kpi-card.kpi-KNOWN .kpi-value { color: #64748b; }
+/* 구 클래스(호환) */
 .kpi-card.kpi-A       { border-left: 4px solid var(--success); }
 .kpi-card.kpi-A .kpi-value { color: var(--success); }
 .kpi-card.kpi-B       { border-left: 4px solid var(--brand); }
@@ -517,10 +526,13 @@ pre.code-block {
 
 .leads-table td.nowrap { white-space: nowrap; }
 .leads-table tbody tr { border-left: 3px solid transparent; }
+.leads-table tbody tr.lead-stripe-MQL   { border-left-color: var(--success); }
+.leads-table tbody tr.lead-stripe-KNOWN { border-left-color: #94a3b8; }
+.leads-table tbody tr.lead-stripe-none  { border-left-color: #fbbf24; }
+/* 구 클래스(호환) */
 .leads-table tbody tr.lead-stripe-A { border-left-color: var(--success); }
 .leads-table tbody tr.lead-stripe-B { border-left-color: var(--brand); }
 .leads-table tbody tr.lead-stripe-C { border-left-color: #94a3b8; }
-.leads-table tbody tr.lead-stripe-none { border-left-color: #fbbf24; }
 
 /* 작은 태그 (상담 희망 등) */
 .tag {

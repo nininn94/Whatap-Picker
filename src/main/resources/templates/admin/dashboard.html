@@ -184,7 +184,7 @@
 <script>
     // ── 컬러 팔레트 ──
     const PALETTE = ['#2563eb','#16a34a','#dc2626','#f59e0b','#8b5cf6','#06b6d4','#64748b','#e11d48','#0891b2','#a855f7','#facc15','#0f766e','#1e40af','#be185d','#92400e','#475569'];
-    const STAGE_COLORS = { A:'#16a34a', B:'#2563eb', C:'#64748b', PENDING:'#f59e0b' };
+    const STAGE_COLORS = { MQL:'#16a34a', KNOWN_LEAD:'#64748b', PENDING:'#f59e0b' };
 
     // ── enum 한국어 라벨 (리드 페이지와 동일 매핑) ──
     const LABELS = {
@@ -320,19 +320,19 @@
         const ec = evtCode();
         const url = '/api/admin/leads?size=500' + (ec ? '&eventCode=' + encodeURIComponent(ec) : '');
         const list = await adminApi.get(url);
-        const dist = { A:0, B:0, C:0, PENDING:0 };
+        const dist = { MQL:0, KNOWN_LEAD:0, PENDING:0 };
         for (const l of (list.content || [])) {
-            if (l.grade) dist[l.grade] = (dist[l.grade] || 0) + 1;
+            if (l.grade && dist[l.grade] !== undefined) dist[l.grade]++;
             else dist.PENDING++;
         }
-        const labels = ['A','B','C','분석중'];
-        const values = [dist.A, dist.B, dist.C, dist.PENDING];
+        const labels = ['MQL', 'Known Lead', '분석중'];
+        const values = [dist.MQL, dist.KNOWN_LEAD, dist.PENDING];
         renderChart('grade-chart', 'bar', labels, values,
-            { colors: [STAGE_COLORS.A, STAGE_COLORS.B, STAGE_COLORS.C, STAGE_COLORS.PENDING] });
+            { colors: [STAGE_COLORS.MQL, STAGE_COLORS.KNOWN_LEAD, STAGE_COLORS.PENDING] });
         const total = values.reduce((a,b)=>a+b,0);
         document.getElementById('grade-summary').innerHTML =
             total === 0 ? '리드 없음' :
-            `A(<strong>${dist.A}</strong>) · B(<strong>${dist.B}</strong>) · C(<strong>${dist.C}</strong>) · 분석중(<strong>${dist.PENDING}</strong>) — 총 ${total}건`;
+            `MQL(<strong>${dist.MQL}</strong>) · Known Lead(<strong>${dist.KNOWN_LEAD}</strong>) · 분석중(<strong>${dist.PENDING}</strong>) — 총 ${total}건`;
     }
 
     // ───────── Segments (+ monitoringStatus 도 함께 렌더) ─────────

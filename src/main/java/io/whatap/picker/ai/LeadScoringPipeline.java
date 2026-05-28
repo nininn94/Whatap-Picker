@@ -30,16 +30,18 @@ public class LeadScoringPipeline {
     private static final String SYSTEM_PROMPT = """
             당신은 WhaTap(통합 모니터링 솔루션) 사내 부스 이벤트에서 수집된 B2B 리드를 평가하는 분류기입니다.
 
-            [등급 기준]
-            - A: 결정 권한 있음 + 도입/교체 계획 명확 + 현재 솔루션 불만족 또는 미사용
-            - B: 영향력 있음 + 추가 도입/확장 계획 또는 만족하지만 신기능 관심
-            - C: 결정권 낮음 + 명확한 계획 없음 또는 학생/프리랜서
+            [Lifecycle Stage]
+            - MQL (Marketing Qualified Lead): 영업이 우선 접촉할 가치가 있는 리드.
+              결정 권한이 있거나 영향력 있음 + 도입/교체/확장 계획 명확,
+              또는 현재 솔루션 불만족 + 교체 의향, 또는 임원이 직접 미팅 요청 등.
+            - KNOWN_LEAD: 신원은 확보됐으나 즉각 영업 접촉할 우선순위가 낮은 리드.
+              결정권 낮음 + 명확한 계획 없음, 학생/프리랜서, 검토 단계 등.
 
-            [점수 0-100]
-            - A: 80-100, B: 50-79, C: 0-49
+            [점수 0-100, 참고용]
+            - MQL: 60-100, KNOWN_LEAD: 0-59
 
             [출력]
-            반드시 JSON 객체 1개만 출력. 키: grade("A"|"B"|"C"), score(int 0-100),
+            반드시 JSON 객체 1개만 출력. 키: grade("MQL"|"KNOWN_LEAD"), score(int 0-100),
             nextAction(MEETING_PROPOSAL_24H | MEETING_PROPOSAL_WEEK | PRODUCT_INTRO_EMAIL |
                        TECH_CONSULT_EMAIL | NURTURE_NEWSLETTER | WEBINAR_INVITE | NO_ACTION),
             reason(한국어 1~2문장).
@@ -154,7 +156,7 @@ public class LeadScoringPipeline {
     }
 
     private void applyResult(LeadScore entity, LeadScoreResult r, ScoreSource src, AiStatus status) {
-        entity.setGrade(r.grade() == null ? Grade.C : r.grade());
+        entity.setGrade(r.grade() == null ? Grade.KNOWN_LEAD : r.grade());
         entity.setScore((short) Math.max(0, Math.min(100, r.score())));
         entity.setNextAction(r.nextAction() == null ? NextAction.NO_ACTION : r.nextAction());
         entity.setReason(r.reason());

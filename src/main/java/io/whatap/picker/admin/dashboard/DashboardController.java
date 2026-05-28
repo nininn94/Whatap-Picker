@@ -99,7 +99,7 @@ public class DashboardController {
                 : leadRepository.findAll().stream()
                     .filter(l -> eventId.equals(l.getEventId())).toList();
         Map<String, Long> out = new LinkedHashMap<>();
-        out.put("A", 0L); out.put("B", 0L); out.put("C", 0L); out.put("PENDING", 0L);
+        out.put("MQL", 0L); out.put("KNOWN_LEAD", 0L); out.put("PENDING", 0L);
         for (Lead l : leads) {
             LeadScore s = leadScoreRepository.findByLeadId(l.getId()).orElse(null);
             if (s == null || s.getGrade() == null) out.merge("PENDING", 1L, Long::sum);
