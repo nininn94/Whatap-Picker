@@ -30,7 +30,10 @@ describe("draw-api", () => {
     const response = await fetchPrizeInventory("event-1");
 
     expect(response.eventCode).toBe("event-1");
-    expect(fetchMock).toHaveBeenCalledWith("/api/prizes?eventCode=event-1", { headers: {} });
+    expect(fetchMock).toHaveBeenCalledWith("/api/prizes?eventCode=event-1", {
+      credentials: "include",
+      headers: {},
+    });
   });
 
   it("posts draw requests as JSON", async () => {
@@ -49,6 +52,7 @@ describe("draw-api", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/draw", {
       method: "POST",
       body: JSON.stringify({ leadId: "lead-1", eventCode: "event-1" }),
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
     });
   });

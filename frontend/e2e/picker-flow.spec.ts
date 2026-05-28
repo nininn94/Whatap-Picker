@@ -75,7 +75,7 @@ test("runs a full mock draw cycle for the test participant", async ({ page }) =>
   await page.getByRole("button", { name: /이벤트 참여하기/ }).click();
 
   await expect(page.getByText("이벤트 및 테스트 관리")).toBeVisible();
-  await expect(page.getByText("현재 선택된 이벤트: event-1")).toBeVisible();
+  await expect(page.getByText(/현재 선택된 이벤트: event-1/)).toBeVisible();
   await page.getByRole("button", { name: /상승형/ }).click();
   await expect
     .poll(async () => page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY))

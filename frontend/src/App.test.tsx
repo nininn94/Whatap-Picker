@@ -1,12 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "@/App";
 
-function inventoryResponse() {
+function inventoryResponse(eventCode = "event-1") {
   return new Response(
     JSON.stringify({
-      eventCode: "event-1",
+      eventCode,
       eventDate: "2026-05-28",
       prizes: [],
     }),
@@ -16,11 +16,23 @@ function inventoryResponse() {
 
 function renderAppWithEventCode(path = "/?eventCode=event-1") {
   window.history.pushState({}, "", path);
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(inventoryResponse()));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const eventCode = new URL(url, window.location.origin).searchParams.get("eventCode") || "event-1";
+      return Promise.resolve(inventoryResponse(eventCode));
+    }),
+  );
   render(<App />);
 }
 
 describe("App participant form", () => {
+  afterEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
   it("shows validation feedback when required participant fields are empty", async () => {
     const user = userEvent.setup();
     renderAppWithEventCode();
@@ -42,7 +54,7 @@ describe("App participant form", () => {
     await user.click(screen.getByRole("button", { name: /이벤트 참여하기/ }));
 
     expect(await screen.findByText("이벤트 및 테스트 관리")).toBeInTheDocument();
-    expect(screen.getByText("현재 선택된 이벤트: event-1")).toBeInTheDocument();
+    expect(screen.getByText(/현재 선택된 이벤트: event-1/)).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /500칸 뽑기 차트/ })).toBeInTheDocument();
   });
 
@@ -71,7 +83,7 @@ describe("App participant form", () => {
     await user.type(screen.getByLabelText("이벤트 코드"), "event-2");
     await user.click(screen.getByRole("button", { name: "이벤트 적용" }));
 
-    expect(screen.getByText("현재 선택된 이벤트: event-2")).toBeInTheDocument();
+    expect(screen.getByText(/현재 선택된 이벤트: event-2/)).toBeInTheDocument();
     expect(window.location.search).toContain("eventCode=event-2");
   });
 
