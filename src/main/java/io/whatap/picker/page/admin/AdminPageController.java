@@ -57,9 +57,26 @@ public class AdminPageController {
         return "admin/leads/list";
     }
 
+    @GetMapping("/leads/{id}")
+    public String leadDetail(@PathVariable UUID id, Model model) {
+        model.addAttribute("leadId", id);
+        return "admin/leads/detail";
+    }
+
+    @GetMapping("/users")
+    public String users() {
+        return "admin/users/list";
+    }
+
     @GetMapping("/forms")
     public String forms() {
         return "admin/forms/list";
+    }
+
+    @GetMapping("/forms/{id}/edit")
+    public String formEdit(@PathVariable UUID id, Model model) {
+        model.addAttribute("formId", id);
+        return "admin/forms/edit";
     }
 
     @GetMapping("/dashboard")

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head(title='리드 상세')}"></head>
+<body>
+<nav th:replace="~{admin/layout :: nav}"></nav>
+<main class="admin-container" th:attr="data-lead-id=${leadId}">
+    <div class="toolbar">
+        <a class="btn btn-secondary" th:href="@{/admin/leads}">← 목록</a>
+        <button class="btn btn-secondary" onclick="rescoreOne()">AI 재분석</button>
+    </div>
+
+    <div class="card">
+        <h2>기본 정보</h2>
+        <div id="lead-basic">불러오는 중...</div>
+    </div>
+
+    <div class="card">
+        <h2>AI 등급</h2>
+        <div id="ai-info" style="margin-bottom: 16px;"></div>
+        <h3>등급 수동 수정</h3>
+        <form onsubmit="return submitOverride(event)">
+            <div class="form-row" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px;">
+                <div><label>등급<br><select name="grade">
+                    <option value="">유지</option>
+                    <option value="A">A</option><option value="B">B</option><option value="C">C</option>
+                </select></label></div>
+                <div><label>점수 (0-100)<br><input name="score" type="number" min="0" max="100"></label></div>
+                <div><label>nextAction<br><select name="nextAction">
+                    <option value="">유지</option>
+                    <option value="MEETING_PROPOSAL_24H">MEETING_PROPOSAL_24H</option>
+                    <option value="MEETING_PROPOSAL_WEEK">MEETING_PROPOSAL_WEEK</option>
+                    <option value="PRODUCT_INTRO_EMAIL">PRODUCT_INTRO_EMAIL</option>
+                    <option value="TECH_CONSULT_EMAIL">TECH_CONSULT_EMAIL</option>
+                    <option value="NURTURE_NEWSLETTER">NURTURE_NEWSLETTER</option>
+                    <option value="WEBINAR_INVITE">WEBINAR_INVITE</option>
+                    <option value="NO_ACTION">NO_ACTION</option>
+                </select></label></div>
+            </div>
+            <div class="form-row">
+                <label>수정 사유 (선택)</label>
+                <textarea name="reason" rows="2" placeholder="검수자: 김마케터"></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">등급 수동 저장</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>설문 응답 (survey_payload)</h2>
+        <pre id="payload" style="background:#f9fafb; padding:12px; border-radius:6px; overflow:auto; max-height:400px;"></pre>
+    </div>
+</main>
+
+<script>
+    const leadId = document.querySelector('main').dataset.leadId;
+    let currentLead = null;
+
+    async function load() {
+        try {
+            currentLead = await adminApi.get(`/api/admin/leads/${leadId}`);
+            renderBasic();
+            renderAi();
+            document.getElementById('payload').textContent = JSON.stringify(currentLead.surveyPayload || {}, null, 2);
+        } catch (e) {
+            document.getElementById('lead-basic').innerHTML = '<p>로드 실패: ' + e.message + '</p>';
+        }
+    }
+
+    function renderBasic() {
+        const l = currentLead;
+        const fields = [
+            ['이름', l.name],
+            ['회사', l.company],
+            ['이메일', l.email],
+            ['휴대폰', l.phone],
+            ['산업', l.industry],
+            ['직무', l.jobFunction],
+            ['직급', l.jobLevel],
+            ['기업 규모', l.companySize],
+            ['모니터링 상태', l.monitoringStatus],
+            ['관심 제품', (l.interestProducts || []).join(', ')],
+            ['1년 내 계획', l.planWithinYear],
+            ['상담 희망', l.consultationPreference],
+            ['제출 시각', l.createdAt ? new Date(l.createdAt).toLocaleString() : ''],
+            ['보존 만료일', l.retentionUntil],
+            ['추첨', l.draw ? `${l.draw.awardedRank ?? '꽝'}등 / ${new Date(l.draw.drawnAt).toLocaleString()}` : '미참여'],
+        ];
+        document.getElementById('lead-basic').innerHTML = '<table>' +
+            fields.map(([k, v]) => `<tr><th style="width:160px;">${k}</th><td>${v ?? ''}</td></tr>`).join('') +
+            '</table>';
+    }
+
+    async function renderAi() {
+        // 별도 API 없으니 list endpoint 재호출하여 ai 정보 가져옴
+        try {
+            const list = await adminApi.get('/api/admin/leads?size=500');
+            const score = (list.content || []).find(l => l.id === leadId);
+            if (score && score.grade !== undefined) {
+                document.getElementById('ai-info').innerHTML = `
+                    <p>상태: <strong>${score.aiStatus || 'PENDING'}</strong>
+                    | 등급: ${score.grade ? `<span class="grade-${score.grade}">${score.grade}</span>` : '-'}
+                    | 점수: ${score.score ?? '-'}</p>`;
+            } else {
+                document.getElementById('ai-info').innerHTML = '<p class="muted">AI 분석 정보 없음 (재분석 버튼으로 트리거)</p>';
+            }
+        } catch (e) {
+            document.getElementById('ai-info').innerHTML = '<p>AI 정보 로드 실패</p>';
+        }
+    }
+
+    async function submitOverride(e) {
+        e.preventDefault();
+        const f = e.target;
+        const body = {};
+        if (f.grade.value) body.grade = f.grade.value;
+        if (f.score.value) body.score = parseInt(f.score.value, 10);
+        if (f.nextAction.value) body.nextAction = f.nextAction.value;
+        if (f.reason.value) body.reason = f.reason.value;
+        if (Object.keys(body).length === 0) { toast('변경할 값이 없습니다.', true); return false; }
+        try {
+            await adminApi.patch(`/api/admin/leads/${leadId}/score`, body);
+            toast('등급이 수정되었습니다 (MANUAL_OVERRIDE).');
+            renderAi();
+        } catch (e) { toast(e.message, true); }
+        return false;
+    }
+
+    async function rescoreOne() {
+        try {
+            await adminApi.post('/api/ai/lead-score', { leadId, force: true });
+            toast('재분석 트리거 완료');
+            setTimeout(renderAi, 1500);
+        } catch (e) { toast(e.message, true); }
+    }
+
+    load();
+</script>
+<div th:replace="~{admin/layout :: scripts}"></div>
+</body>
+</html>

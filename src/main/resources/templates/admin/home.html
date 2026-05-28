@@ -6,31 +6,53 @@
 <main class="admin-container">
     <h1>WhaTap Picker 어드민</h1>
 
+    <div class="dashboard-grid" id="quick-cards"></div>
+
     <div class="card">
-        <h2>활성 행사</h2>
+        <div class="toolbar">
+            <h2 style="margin:0;">행사 목록</h2>
+            <div class="spacer"></div>
+            <a class="btn btn-primary" th:href="@{/admin/events}">전체 관리 →</a>
+        </div>
         <table>
-            <thead>
-            <tr><th>코드</th><th>라벨</th><th>일자</th><th>상태</th><th></th></tr>
-            </thead>
+            <thead><tr><th>코드</th><th>라벨</th><th>일자</th><th>상태</th><th>액션</th></tr></thead>
             <tbody>
             <tr th:each="e : ${events}">
                 <td><a th:href="@{|/admin/events/${e.id}/prizes|}" th:text="${e.eventCode}"></a></td>
                 <td th:text="${e.label}"></td>
                 <td th:text="${e.eventDate}"></td>
+                <td><span th:class="'status-badge status-' + ${e.status}" th:text="${e.status}"></span></td>
                 <td>
-                    <span th:class="'status-badge status-' + ${e.status}" th:text="${e.status}"></span>
-                </td>
-                <td>
+                    <a class="btn btn-secondary" th:href="@{|/admin/events/${e.id}/prizes|}">재고</a>
                     <a class="btn btn-secondary" th:href="@{|/event/${e.eventCode}/qr|}" target="_blank">QR</a>
+                    <a class="btn btn-secondary" th:href="@{|/survey/${e.eventCode}|}" target="_blank">설문</a>
                 </td>
             </tr>
             <tr th:if="${#lists.isEmpty(events)}">
-                <td colspan="5">등록된 행사가 없습니다.</td>
+                <td colspan="5">등록된 행사가 없습니다. <a th:href="@{/admin/events}">행사 생성</a>으로 추가하세요.</td>
             </tr>
             </tbody>
         </table>
     </div>
 </main>
+
+<script>
+    async function loadQuick() {
+        const cards = [];
+        try {
+            const ps = await adminApi.get('/api/admin/leads/pending-scores');
+            cards.push(`<div class="dashboard-card"><div class="label">AI 분석 대기</div><div class="value">${ps.pendingCount}</div></div>`);
+            cards.push(`<div class="dashboard-card"><div class="label">AI 분석 실패</div><div class="value">${ps.failedCount}</div></div>`);
+        } catch (e) {}
+        try {
+            const s = await adminApi.get('/api/admin/dashboard/summary');
+            cards.push(`<div class="dashboard-card"><div class="label">전체 리드</div><div class="value">${s.leadCount}</div></div>`);
+            cards.push(`<div class="dashboard-card"><div class="label">전체 추첨</div><div class="value">${s.drawCount}</div></div>`);
+        } catch (e) {}
+        document.getElementById('quick-cards').innerHTML = cards.join('');
+    }
+    loadQuick();
+</script>
 <div th:replace="~{admin/layout :: scripts}"></div>
 </body>
 </html>

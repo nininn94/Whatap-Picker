@@ -5,41 +5,121 @@
 <nav th:replace="~{admin/layout :: nav}"></nav>
 <main class="admin-container">
     <h1>대시보드</h1>
+
     <div class="card">
-        <select id="event-filter">
-            <option value="">전체</option>
-            <option th:each="e : ${events}" th:value="${e.eventCode}" th:text="|${e.eventCode} - ${e.label}|"></option>
-        </select>
+        <div class="toolbar">
+            <select id="event-filter">
+                <option value="">전체</option>
+                <option th:each="e : ${events}" th:value="${e.eventCode}" th:text="|${e.eventCode} - ${e.label}|"></option>
+            </select>
+            <button class="btn btn-secondary" onclick="loadAll()">새로고침</button>
+            <div class="spacer"></div>
+            <button class="btn btn-primary" onclick="exportSummary()">요약 CSV</button>
+            <button class="btn btn-primary" onclick="exportSegments()">세그먼트 CSV</button>
+            <button class="btn btn-primary" onclick="exportMonitoring()">모니터링 CSV</button>
+            <button class="btn btn-primary" onclick="exportIntent()">관심 CSV</button>
+        </div>
     </div>
+
     <div class="dashboard-grid" id="summary-cards"></div>
-    <div class="card"><h2>관심 제품 / 도입 계획</h2><div id="intent-data"></div></div>
-    <div class="card"><h2>모니터링 사용 현황</h2><div id="monitoring-data"></div></div>
+
+    <div class="card">
+        <h2>등급 분포</h2>
+        <canvas id="grade-chart" height="80"></canvas>
+    </div>
+
+    <div class="card">
+        <h2>산업 / 직급</h2>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+            <canvas id="industry-chart"></canvas>
+            <canvas id="joblevel-chart"></canvas>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>관심 제품 / 1년 내 계획</h2>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+            <canvas id="interest-chart"></canvas>
+            <canvas id="plan-chart"></canvas>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>모니터링 사용 현황 (raw)</h2>
+        <pre id="monitoring-data" style="background:#f9fafb; padding:12px; border-radius:6px; overflow:auto; max-height:300px;"></pre>
+    </div>
 </main>
+
 <script>
-    async function fetchJson(url) {
-        const res = await fetch(url, { headers: { 'Authorization':'Bearer ' + localStorage.getItem('jwt') }});
-        if (!res.ok) return null;
-        return res.json();
+    const charts = {};
+    function evtCode() { return document.getElementById('event-filter').value; }
+    function param()   { const ec = evtCode(); return ec ? '?eventCode=' + encodeURIComponent(ec) : ''; }
+
+    function renderChart(id, type, labels, values, title) {
+        if (charts[id]) charts[id].destroy();
+        const ctx = document.getElementById(id).getContext('2d');
+        charts[id] = new Chart(ctx, {
+            type,
+            data: { labels, datasets: [{
+                label: title,
+                data: values,
+                backgroundColor: ['#2563eb','#16a34a','#dc2626','#f59e0b','#8b5cf6','#06b6d4','#64748b','#e11d48','#0891b2','#a855f7']
+            }]},
+            options: { responsive: true, maintainAspectRatio: true,
+                       plugins: { legend: { display: type !== 'bar' } } }
+        });
     }
-    async function load() {
-        const ec = document.getElementById('event-filter').value;
-        const param = ec ? `?eventCode=${encodeURIComponent(ec)}` : '';
-        const s = await fetchJson('/api/admin/dashboard/summary' + param);
-        if (s) {
-            document.getElementById('summary-cards').innerHTML = `
-                <div class="dashboard-card"><div class="label">총 리드</div><div class="value">${s.leadCount ?? 0}</div></div>
-                <div class="dashboard-card"><div class="label">추첨</div><div class="value">${s.drawCount ?? 0}</div></div>
-                <div class="dashboard-card"><div class="label">상담 희망</div><div class="value">${s.wantsConsultationCount ?? 0}</div></div>
-                <div class="dashboard-card"><div class="label">유효 메일 비율</div><div class="value">${(((s.validEmailRatio ?? 0) * 100)|0)}%</div></div>
-                <div class="dashboard-card"><div class="label">거부 이메일</div><div class="value">${s.emailRejectionCount ?? 0}</div></div>`;
+
+    async function loadSummary() {
+        const s = await adminApi.get('/api/admin/dashboard/summary' + param());
+        document.getElementById('summary-cards').innerHTML = `
+            <div class="dashboard-card"><div class="label">총 리드</div><div class="value">${s.leadCount ?? 0}</div></div>
+            <div class="dashboard-card"><div class="label">추첨</div><div class="value">${s.drawCount ?? 0}</div></div>
+            <div class="dashboard-card"><div class="label">상담 희망</div><div class="value">${s.wantsConsultationCount ?? 0}</div></div>
+            <div class="dashboard-card"><div class="label">유효 메일 비율</div><div class="value">${Math.round((s.validEmailRatio ?? 0) * 100)}%</div></div>
+            <div class="dashboard-card"><div class="label">거부 이메일</div><div class="value">${s.emailRejectionCount ?? 0}</div></div>`;
+    }
+    async function loadSegments() {
+        const seg = await adminApi.get('/api/admin/dashboard/segments' + param());
+        renderChart('industry-chart', 'bar',     Object.keys(seg.industry || {}), Object.values(seg.industry || {}), '산업');
+        renderChart('joblevel-chart', 'doughnut', Object.keys(seg.jobLevel || {}), Object.values(seg.jobLevel || {}), '직급');
+    }
+    async function loadIntent() {
+        const intent = await adminApi.get('/api/admin/dashboard/intent' + param());
+        renderChart('interest-chart', 'bar',     Object.keys(intent.interestProducts || {}), Object.values(intent.interestProducts || {}), '관심 제품');
+        renderChart('plan-chart',     'doughnut', Object.keys(intent.planWithinYear   || {}), Object.values(intent.planWithinYear   || {}), '1년 내 계획');
+    }
+    async function loadMonitoring() {
+        const m = await adminApi.get('/api/admin/dashboard/monitoring' + param());
+        document.getElementById('monitoring-data').textContent = JSON.stringify(m, null, 2);
+    }
+    async function loadGradeDist() {
+        const ec = evtCode();
+        const url = '/api/admin/leads?size=500' + (ec ? '&eventCode=' + encodeURIComponent(ec) : '');
+        const list = await adminApi.get(url);
+        const dist = { A: 0, B: 0, C: 0, PENDING: 0 };
+        for (const l of (list.content || [])) {
+            if (l.grade) dist[l.grade] = (dist[l.grade] || 0) + 1;
+            else dist.PENDING++;
         }
-        const intent = await fetchJson('/api/admin/dashboard/intent' + param);
-        if (intent) document.getElementById('intent-data').textContent = JSON.stringify(intent, null, 2);
-        const monitoring = await fetchJson('/api/admin/dashboard/monitoring' + param);
-        if (monitoring) document.getElementById('monitoring-data').textContent = JSON.stringify(monitoring, null, 2);
+        renderChart('grade-chart', 'bar', Object.keys(dist), Object.values(dist), '등급 분포');
     }
-    document.getElementById('event-filter').addEventListener('change', load);
-    load();
+
+    async function loadAll() {
+        try { await loadSummary(); }    catch (e) { toast(e.message, true); }
+        try { await loadSegments(); }   catch (e) {}
+        try { await loadIntent(); }     catch (e) {}
+        try { await loadMonitoring(); } catch (e) {}
+        try { await loadGradeDist(); }  catch (e) {}
+    }
+
+    async function exportSummary()    { try { await adminApi.download('/api/admin/dashboard/export/summary.csv'    + param()); } catch(e){ toast(e.message,true);} }
+    async function exportSegments()   { try { await adminApi.download('/api/admin/dashboard/export/segments.csv'   + param()); } catch(e){ toast(e.message,true);} }
+    async function exportMonitoring() { try { await adminApi.download('/api/admin/dashboard/export/monitoring.csv' + param()); } catch(e){ toast(e.message,true);} }
+    async function exportIntent()     { try { await adminApi.download('/api/admin/dashboard/export/intent.csv'     + param()); } catch(e){ toast(e.message,true);} }
+
+    document.getElementById('event-filter').addEventListener('change', loadAll);
+    loadAll();
 </script>
 <div th:replace="~{admin/layout :: scripts}"></div>
 </body>

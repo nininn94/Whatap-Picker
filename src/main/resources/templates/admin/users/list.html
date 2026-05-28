@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head(title='계정 관리')}"></head>
+<body>
+<nav th:replace="~{admin/layout :: nav}"></nav>
+<main class="admin-container">
+    <h1>운영자/어드민 계정 관리</h1>
+
+    <div class="toolbar">
+        <button class="btn btn-primary" onclick="openCreateModal()">+ 계정 생성</button>
+    </div>
+
+    <div class="card">
+        <table id="users-table">
+            <thead>
+            <tr><th>username</th><th>역할</th><th>활성</th><th>생성일</th><th>액션</th></tr>
+            </thead>
+            <tbody id="users-body">
+                <tr><td colspan="5">불러오는 중...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</main>
+
+<!-- 생성 모달 -->
+<div id="create-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal">
+        <h2>계정 생성</h2>
+        <form onsubmit="return submitCreate(event)">
+            <div class="form-row">
+                <label>username</label>
+                <input name="username" required minlength="3" maxlength="50">
+            </div>
+            <div class="form-row">
+                <label>비밀번호 (8자 이상)</label>
+                <input name="password" type="password" required minlength="8" maxlength="72">
+            </div>
+            <div class="form-row">
+                <label>역할</label>
+                <select name="role" required>
+                    <option value="OPERATOR">OPERATOR</option>
+                    <option value="ADMIN">ADMIN</option>
+                </select>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeCreateModal()">취소</button>
+                <button type="submit" class="btn btn-primary">생성</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 비밀번호 리셋 모달 -->
+<div id="reset-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal">
+        <h2>비밀번호 리셋</h2>
+        <form onsubmit="return submitReset(event)">
+            <input type="hidden" name="userId">
+            <p class="muted">대상: <strong id="reset-username"></strong></p>
+            <div class="form-row">
+                <label>새 비밀번호 (8자 이상)</label>
+                <input name="newPassword" type="password" required minlength="8" maxlength="72">
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeResetModal()">취소</button>
+                <button type="submit" class="btn btn-primary">리셋</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function openCreateModal()  { document.getElementById('create-modal').style.display = 'flex'; }
+    function closeCreateModal() { document.getElementById('create-modal').style.display = 'none'; }
+    function openResetModal(id, username) {
+        document.querySelector('#reset-modal input[name=userId]').value = id;
+        document.getElementById('reset-username').textContent = username;
+        document.getElementById('reset-modal').style.display = 'flex';
+    }
+    function closeResetModal() { document.getElementById('reset-modal').style.display = 'none'; }
+
+    async function loadUsers() {
+        try {
+            const users = await adminApi.get('/api/admin/users');
+            const tbody = document.getElementById('users-body');
+            if (users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5">계정 없음</td></tr>';
+                return;
+            }
+            tbody.innerHTML = users.map(u => `
+                <tr data-id="${u.id}">
+                    <td>${u.username}</td>
+                    <td>${u.role}</td>
+                    <td>
+                        <label>
+                            <input type="checkbox" ${u.enabled ? 'checked' : ''} onchange="toggleEnabled('${u.id}', this.checked)">
+                            ${u.enabled ? '활성' : '비활성'}
+                        </label>
+                    </td>
+                    <td>${new Date(u.createdAt).toLocaleString()}</td>
+                    <td>
+                        <button class="btn btn-secondary" onclick="openResetModal('${u.id}', '${u.username}')">비밀번호 리셋</button>
+                        <button class="btn btn-danger" onclick="deleteUser('${u.id}', '${u.username}')">삭제</button>
+                    </td>
+                </tr>`).join('');
+        } catch (e) {
+            document.getElementById('users-body').innerHTML = '<tr><td colspan="5">로드 실패: ' + e.message + '</td></tr>';
+        }
+    }
+
+    async function submitCreate(e) {
+        e.preventDefault();
+        const f = e.target;
+        const body = { username: f.username.value, password: f.password.value, role: f.role.value };
+        try {
+            await adminApi.post('/api/admin/users', body);
+            toast('계정이 생성되었습니다.');
+            closeCreateModal();
+            f.reset();
+            loadUsers();
+        } catch (e) { toast(e.message, true); }
+        return false;
+    }
+
+    async function submitReset(e) {
+        e.preventDefault();
+        const f = e.target;
+        try {
+            await adminApi.patch(`/api/admin/users/${f.userId.value}`, { newPassword: f.newPassword.value });
+            toast('비밀번호가 리셋되었습니다.');
+            closeResetModal();
+            f.reset();
+        } catch (e) { toast(e.message, true); }
+        return false;
+    }
+
+    async function toggleEnabled(id, enabled) {
+        try {
+            await adminApi.patch(`/api/admin/users/${id}`, { enabled });
+            toast(enabled ? '활성화되었습니다.' : '비활성화되었습니다.');
+            loadUsers();
+        } catch (e) { toast(e.message, true); loadUsers(); }
+    }
+
+    async function deleteUser(id, username) {
+        if (!confirm(`'${username}' 계정을 정말 삭제하시겠습니까?`)) return;
+        try {
+            await adminApi.del(`/api/admin/users/${id}`);
+            toast('삭제되었습니다.');
+            loadUsers();
+        } catch (e) { toast(e.message, true); }
+    }
+
+    loadUsers();
+</script>
+<div th:replace="~{admin/layout :: scripts}"></div>
+</body>
+</html>

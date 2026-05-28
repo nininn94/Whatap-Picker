@@ -3,62 +3,106 @@
 <head th:replace="~{admin/layout :: head(title='경품 재고 관리')}"></head>
 <body>
 <nav th:replace="~{admin/layout :: nav}"></nav>
-<main class="admin-container" x-data="prizeManager()">
+<main class="admin-container" th:attr="data-event-id=${event.id}">
     <h1 th:text="|${event.label} - 경품 재고 관리|"></h1>
-    <p class="muted" th:text="|이벤트 코드: ${event.eventCode} | 상태: ${event.status}|"></p>
+    <p class="muted">
+        이벤트 코드: <code th:text="${event.eventCode}"></code>
+        | 상태: <span th:text="${event.status}"></span>
+        | 폼 잠금: <span th:text="${event.formLocked ? '🔒 잠김 (응답 시작됨)' : '🔓 열림'}"></span>
+    </p>
+
+    <div class="toolbar">
+        <button class="btn btn-primary" onclick="addRow()">+ 등수 추가</button>
+        <button class="btn btn-primary" onclick="saveAll()">전체 저장</button>
+        <a class="btn btn-secondary" th:href="@{/admin/events}">← 행사 목록</a>
+    </div>
 
     <div class="card">
-        <table>
+        <table id="prize-table">
             <thead>
             <tr>
-                <th>등수</th><th>경품명</th><th>초기 수량</th>
-                <th>당첨 수</th><th>잔여</th><th>소진율</th><th></th>
+                <th style="width:80px;">등수</th>
+                <th>경품명</th>
+                <th style="width:120px;">초기 수량</th>
+                <th style="width:80px;">당첨</th>
+                <th style="width:80px;">잔여</th>
+                <th style="width:100px;">소진율</th>
+                <th style="width:140px;">액션</th>
             </tr>
             </thead>
-            <tbody>
+            <tbody id="prize-body">
             <tr th:each="p : ${prizes}" th:attr="data-id=${p.id}">
-                <td th:text="${p.rank}"></td>
-                <td><input type="text" th:value="${p.name}" :name="'name-' + [[${p.id}]]"></td>
-                <td><input type="number" min="0" th:value="${p.initialQty}" :name="'initial-' + [[${p.id}]]"></td>
+                <td><input type="number" min="1" th:value="${p.rank}" class="rank-input" readonly></td>
+                <td><input type="text" th:value="${p.name}" class="name-input"></td>
+                <td><input type="number" min="0" th:value="${p.initialQty}" class="initial-input"></td>
                 <td th:text="${p.initialQty - p.remainingQty}"></td>
                 <td th:text="${p.remainingQty}"></td>
                 <td>
                     <span th:text="${#numbers.formatPercent((p.initialQty - p.remainingQty) * 1.0 / (p.initialQty == 0 ? 1 : p.initialQty), 1, 0)}"></span>
                 </td>
-                <td>
-                    <button class="btn btn-primary" @click="save([[${p.id}]])">저장</button>
-                </td>
+                <td><button class="btn btn-danger" onclick="deletePrize(this)">삭제</button></td>
             </tr>
             <tr th:if="${#lists.isEmpty(prizes)}">
-                <td colspan="7">
-                    아직 등록된 경품이 없습니다. <code>POST /api/admin/events/{id}/prizes</code> 로 일괄 등록해주세요.
-                </td>
+                <td colspan="7">등록된 경품이 없습니다. "+ 등수 추가"로 시작하세요.</td>
             </tr>
             </tbody>
         </table>
     </div>
-
-    <p class="muted" th:if="${event.formLocked}">
-        ⚠️ 이 행사는 이미 응답이 시작되어 폼 변경이 불가합니다. (경품 수량은 차감된 양 이하로만 줄일 수 없음)
-    </p>
 </main>
-<script th:inline="javascript">
-    const eventId = /*[[${event.id}]]*/ '';
-    function prizeManager() {
-        return {
-            async save(prizeId) {
-                const row = document.querySelector(`tr[data-id='${prizeId}']`);
-                const name = row.querySelector(`input[name='name-${prizeId}']`).value;
-                const initial = parseInt(row.querySelector(`input[name='initial-${prizeId}']`).value, 10);
-                const res = await fetch(`/api/admin/prizes/${prizeId}`, {
-                    method: 'PATCH',
-                    headers: {'Content-Type':'application/json','Authorization':'Bearer ' + localStorage.getItem('jwt')},
-                    body: JSON.stringify({ name, initialQty: initial })
-                });
-                if (res.ok) location.reload();
-                else alert('저장 실패: ' + res.status);
-            }
-        };
+
+<script>
+    const eventId = document.querySelector('main').dataset.eventId;
+
+    function addRow() {
+        const tbody = document.getElementById('prize-body');
+        // 빈 안내 행이 있으면 제거
+        const empty = tbody.querySelector('tr[colspan]');
+        if (empty) empty.remove();
+
+        const used = [...tbody.querySelectorAll('.rank-input')].map(i => parseInt(i.value, 10) || 0);
+        let nextRank = 1;
+        while (used.includes(nextRank)) nextRank++;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><input type="number" min="1" value="${nextRank}" class="rank-input"></td>
+            <td><input type="text" placeholder="경품명" class="name-input"></td>
+            <td><input type="number" min="0" value="1" class="initial-input"></td>
+            <td>-</td><td>-</td><td>-</td>
+            <td><button class="btn btn-secondary" onclick="this.closest('tr').remove()">취소</button></td>`;
+        tbody.appendChild(tr);
+    }
+
+    async function saveAll() {
+        const rows = [...document.querySelectorAll('#prize-body tr[data-id], #prize-body tr:not([data-id])')];
+        const prizes = rows
+            .filter(r => r.querySelector('.name-input'))
+            .map(r => ({
+                rank: parseInt(r.querySelector('.rank-input').value, 10),
+                name: (r.querySelector('.name-input').value || '').trim(),
+                initialQty: parseInt(r.querySelector('.initial-input').value, 10)
+            }))
+            .filter(p => p.name && p.rank > 0 && Number.isInteger(p.initialQty) && p.initialQty >= 0);
+
+        if (prizes.length === 0) { toast('저장할 경품이 없습니다.', true); return; }
+
+        try {
+            await adminApi.post(`/api/admin/events/${eventId}/prizes`, { prizes });
+            toast('저장되었습니다.');
+            setTimeout(() => location.reload(), 500);
+        } catch (e) { toast(e.message, true); }
+    }
+
+    async function deletePrize(btn) {
+        const row = btn.closest('tr');
+        const id = row.dataset.id;
+        if (!id) { row.remove(); return; }
+        if (!confirm('이 경품을 삭제하시겠습니까? (이미 당첨 이력이 있으면 거부됩니다.)')) return;
+        try {
+            await adminApi.del(`/api/admin/prizes/${id}`);
+            toast('삭제되었습니다.');
+            row.remove();
+        } catch (e) { toast(e.message, true); }
     }
 </script>
 <div th:replace="~{admin/layout :: scripts}"></div>

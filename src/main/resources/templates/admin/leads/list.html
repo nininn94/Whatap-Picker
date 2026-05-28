@@ -5,43 +5,104 @@
 <nav th:replace="~{admin/layout :: nav}"></nav>
 <main class="admin-container">
     <h1>리드 조회</h1>
+
     <div class="card">
-        <p class="muted">필터 + CSV 다운로드. JWT 필요 — <code>localStorage.jwt</code> 에 토큰을 저장한 뒤 새로 고침.</p>
-        <button class="btn btn-primary" onclick="downloadCsv()">CSV 다운로드</button>
-        <select id="event-filter">
-            <option value="">전체 행사</option>
-            <option th:each="e : ${events}" th:value="${e.eventCode}" th:text="|${e.eventCode} - ${e.label}|"></option>
-        </select>
-        <div id="leads-table"></div>
+        <div class="toolbar">
+            <select id="event-filter">
+                <option value="">전체 행사</option>
+                <option th:each="e : ${events}" th:value="${e.eventCode}" th:text="|${e.eventCode} - ${e.label}|"></option>
+            </select>
+            <select id="grade-filter">
+                <option value="">전체 등급</option>
+                <option value="A">A</option><option value="B">B</option><option value="C">C</option>
+            </select>
+            <button class="btn btn-secondary" onclick="loadLeads()">조회</button>
+            <button class="btn btn-secondary" onclick="loadPending()">대기/실패 확인</button>
+            <div class="spacer"></div>
+            <button class="btn btn-secondary" onclick="rescore()">일괄 재분석</button>
+            <button class="btn btn-danger"   onclick="deleteExpired()">만료 파기</button>
+            <button class="btn btn-primary"  onclick="downloadCsv()">CSV 다운로드</button>
+        </div>
+        <p id="pending-status" class="muted" style="margin:8px 0;"></p>
+        <div id="leads-table">불러오는 중...</div>
     </div>
 </main>
+
 <script>
     async function loadLeads() {
         const ec = document.getElementById('event-filter').value;
-        const url = '/api/admin/leads' + (ec ? `?eventCode=${encodeURIComponent(ec)}` : '');
-        const res = await fetch(url, { headers: { 'Authorization':'Bearer ' + localStorage.getItem('jwt') }});
-        if (!res.ok) { document.getElementById('leads-table').innerHTML = '<p>로드 실패</p>'; return; }
-        const data = await res.json();
-        const rows = (data.content || []).map(l => `
-            <tr><td>${l.name}</td><td>${l.company}</td><td>${l.industry}</td>
-            <td>${l.jobLevel}</td><td>${l.monitoringStatus}</td><td>${new Date(l.createdAt).toLocaleString()}</td></tr>`).join('');
-        document.getElementById('leads-table').innerHTML = `<table>
-            <thead><tr><th>이름</th><th>회사</th><th>산업</th><th>직급</th><th>모니터링</th><th>제출</th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="6">데이터 없음</td></tr>'}</tbody></table>`;
+        const grade = document.getElementById('grade-filter').value;
+        const params = new URLSearchParams();
+        if (ec) params.set('eventCode', ec);
+        if (grade) params.set('grade', grade);
+        params.set('size', '100');
+        try {
+            const data = await adminApi.get('/api/admin/leads?' + params);
+            const rows = (data.content || []).map(l => `
+                <tr>
+                    <td><a href="/admin/leads/${l.id}">${l.name}</a></td>
+                    <td>${l.company || ''}</td>
+                    <td>${l.industry || ''}</td>
+                    <td>${l.jobLevel || ''}</td>
+                    <td>${l.monitoringStatus || ''}</td>
+                    <td>${l.grade ? `<span class="grade-${l.grade}">${l.grade}</span>` : (l.aiStatus === 'PENDING' ? '<span class="grade-PENDING">분석중</span>' : '-')}</td>
+                    <td>${l.score ?? '-'}</td>
+                    <td>${new Date(l.createdAt).toLocaleString()}</td>
+                </tr>`).join('');
+            document.getElementById('leads-table').innerHTML = `
+                <table>
+                    <thead><tr>
+                        <th>이름</th><th>회사</th><th>산업</th><th>직급</th>
+                        <th>모니터링</th><th>AI 등급</th><th>점수</th><th>제출</th>
+                    </tr></thead>
+                    <tbody>${rows || '<tr><td colspan="8">데이터 없음</td></tr>'}</tbody>
+                </table>
+                <p class="muted">총 ${data.totalElements || 0}건</p>`;
+        } catch (e) {
+            document.getElementById('leads-table').innerHTML = '<p>로드 실패: ' + e.message + '</p>';
+        }
     }
+
+    async function loadPending() {
+        try {
+            const data = await adminApi.get('/api/admin/leads/pending-scores');
+            document.getElementById('pending-status').innerHTML =
+                `⚠️ PENDING <strong>${data.pendingCount}</strong>건 / FAILED <strong>${data.failedCount}</strong>건`;
+        } catch (e) { toast(e.message, true); }
+    }
+
+    async function rescore() {
+        const ec = document.getElementById('event-filter').value;
+        if (!confirm('PENDING/FAILED 상태인 리드를 재분석 큐에 넣을까요?')) return;
+        try {
+            const r = await adminApi.post('/api/admin/leads/rescore', { eventCode: ec || null });
+            toast(`${r.queued}건 재분석 시작`);
+            setTimeout(loadPending, 1000);
+        } catch (e) { toast(e.message, true); }
+    }
+
+    async function deleteExpired() {
+        if (!confirm('보존 기간(2년) 만료된 리드를 모두 hard delete 합니다. 진행할까요?')) return;
+        try {
+            const r = await adminApi.del('/api/admin/leads/expired');
+            toast(`${r.deleted}건 파기되었습니다.`);
+            loadLeads();
+        } catch (e) { toast(e.message, true); }
+    }
+
     async function downloadCsv() {
         const ec = document.getElementById('event-filter').value;
-        const url = '/api/admin/leads/export.csv' + (ec ? `?eventCode=${encodeURIComponent(ec)}` : '');
-        const res = await fetch(url, { headers: { 'Authorization':'Bearer ' + localStorage.getItem('jwt') }});
-        if (!res.ok) { alert('CSV 다운로드 실패'); return; }
-        const blob = await res.blob();
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = res.headers.get('Content-Disposition')?.match(/filename="(.+?)"/)?.[1] || 'leads.csv';
-        a.click();
+        const params = ec ? '?eventCode=' + encodeURIComponent(ec) : '';
+        try {
+            await adminApi.download('/api/admin/leads/export.csv' + params);
+            toast('CSV 다운로드 시작');
+        } catch (e) { toast(e.message, true); }
     }
+
     document.getElementById('event-filter').addEventListener('change', loadLeads);
+    document.getElementById('grade-filter').addEventListener('change', loadLeads);
     loadLeads();
+    loadPending();
 </script>
 <div th:replace="~{admin/layout :: scripts}"></div>
 </body>

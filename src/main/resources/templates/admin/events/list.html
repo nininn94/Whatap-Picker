@@ -5,25 +5,127 @@
 <nav th:replace="~{admin/layout :: nav}"></nav>
 <main class="admin-container">
     <h1>행사 관리</h1>
+
+    <div class="toolbar">
+        <button class="btn btn-primary" onclick="openCreateModal()">+ 행사 생성</button>
+    </div>
+
     <div class="card">
-        <p class="muted">행사 생성은 <code>POST /api/admin/events</code> 를 통해 가능합니다. (UI는 추후)</p>
-        <table>
+        <table id="events-table">
             <thead>
-            <tr><th>코드</th><th>라벨</th><th>일자</th><th>상태</th><th>경품</th><th>QR</th></tr>
+            <tr>
+                <th>코드</th><th>라벨</th><th>일자</th><th>상태</th>
+                <th>경품</th><th>QR</th><th>설문</th><th>액션</th>
+            </tr>
             </thead>
             <tbody>
-            <tr th:each="e : ${events}">
+            <tr th:each="e : ${events}" th:attr="data-id=${e.id}, data-code=${e.eventCode}">
                 <td th:text="${e.eventCode}"></td>
                 <td th:text="${e.label}"></td>
                 <td th:text="${e.eventDate}"></td>
-                <td><span th:class="'status-badge status-' + ${e.status}" th:text="${e.status}"></span></td>
-                <td><a class="btn btn-secondary" th:href="@{|/admin/events/${e.id}/prizes|}">재고 관리</a></td>
+                <td>
+                    <select onchange="changeStatus(this)">
+                        <option value="DRAFT"    th:selected="${e.status.name() == 'DRAFT'}">DRAFT</option>
+                        <option value="OPEN"     th:selected="${e.status.name() == 'OPEN'}">OPEN</option>
+                        <option value="CLOSED"   th:selected="${e.status.name() == 'CLOSED'}">CLOSED</option>
+                        <option value="ARCHIVED" th:selected="${e.status.name() == 'ARCHIVED'}">ARCHIVED</option>
+                    </select>
+                </td>
+                <td><a class="btn btn-secondary" th:href="@{|/admin/events/${e.id}/prizes|}">재고</a></td>
                 <td><a class="btn btn-secondary" th:href="@{|/event/${e.eventCode}/qr|}" target="_blank">QR</a></td>
+                <td><a class="btn btn-secondary" th:href="@{|/survey/${e.eventCode}|}" target="_blank">설문</a></td>
+                <td>
+                    <button class="btn btn-secondary" onclick="regenerateQr(this)">QR 재생성</button>
+                    <button class="btn btn-danger" onclick="deleteEvent(this)">삭제</button>
+                </td>
+            </tr>
+            <tr th:if="${#lists.isEmpty(events)}">
+                <td colspan="8">등록된 행사가 없습니다. "행사 생성"으로 추가하세요.</td>
             </tr>
             </tbody>
         </table>
     </div>
 </main>
+
+<div id="create-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal">
+        <h2>새 행사 생성</h2>
+        <form id="create-form" onsubmit="return submitCreate(event)">
+            <div class="form-row">
+                <label>event_code <span class="muted">(소문자/숫자/하이픈, 80자 이하)</span></label>
+                <input name="eventCode" required pattern="[a-z0-9][a-z0-9\-]{0,79}" placeholder="devops-day-2026">
+            </div>
+            <div class="form-row">
+                <label>라벨</label>
+                <input name="label" required placeholder="DEVOPS DAY 2026">
+            </div>
+            <div class="form-row">
+                <label>행사 시작일</label>
+                <input name="eventDate" type="date" required>
+            </div>
+            <div class="form-row">
+                <label>행사 종료일 (선택)</label>
+                <input name="endDate" type="date">
+            </div>
+            <div class="form-row">
+                <label>상태</label>
+                <select name="status">
+                    <option value="DRAFT" selected>DRAFT</option>
+                    <option value="OPEN">OPEN (즉시 공개)</option>
+                </select>
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeCreateModal()">취소</button>
+                <button type="submit" class="btn btn-primary">생성</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function openCreateModal()  { document.getElementById('create-modal').style.display = 'flex'; }
+    function closeCreateModal() { document.getElementById('create-modal').style.display = 'none'; }
+
+    async function submitCreate(e) {
+        e.preventDefault();
+        const f = e.target;
+        const body = {
+            eventCode: f.eventCode.value,
+            label: f.label.value,
+            eventDate: f.eventDate.value,
+            endDate: f.endDate.value || null,
+            status: f.status.value
+        };
+        try {
+            await adminApi.post('/api/admin/events', body);
+            toast('행사가 생성되었습니다.');
+            setTimeout(() => location.reload(), 500);
+        } catch (e) { toast(e.message, true); }
+        return false;
+    }
+    async function changeStatus(sel) {
+        const id = sel.closest('tr').dataset.id;
+        try {
+            await adminApi.patch(`/api/admin/events/${id}`, { status: sel.value });
+            toast('상태가 변경되었습니다: ' + sel.value);
+        } catch (e) { toast(e.message, true); }
+    }
+    async function deleteEvent(btn) {
+        const row = btn.closest('tr');
+        if (!confirm(`'${row.dataset.code}' 를 삭제하시겠습니까? (추첨 이력이 있으면 거부됩니다.)`)) return;
+        try {
+            await adminApi.del(`/api/admin/events/${row.dataset.id}`);
+            toast('삭제되었습니다.');
+            row.remove();
+        } catch (e) { toast(e.message, true); }
+    }
+    async function regenerateQr(btn) {
+        try {
+            await adminApi.post(`/api/admin/events/${btn.closest('tr').dataset.id}/regenerate-qr`);
+            toast('QR 캐시가 무효화되었습니다.');
+        } catch (e) { toast(e.message, true); }
+    }
+</script>
 <div th:replace="~{admin/layout :: scripts}"></div>
 </body>
 </html>
