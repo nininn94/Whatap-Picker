@@ -8,7 +8,7 @@
 > - 이메일 정책: `jobFunction == STUDENT_FREELANCER`면 개인 메일 허용, 나머지 14종은 회사 메일 강제
 > - AI: 오픈소스 **Ollama** (Docker, CPU only), 모델 **`qwen2.5:1.5b`** (≈1GB, 한국어 분석 + JSON 모드 안정)
 > - **Spring Boot 4.x + Spring AI 1.x** — `ChatClient` + `BeanOutputConverter`로 구조화 출력(JSON 파싱 코드 0줄), `PromptTemplate` 변수 치환, Advisors로 로깅/메모리, Micrometer 자동 통합
-> - 운영자/어드민 로그인 필요, 초기 어드민은 앱 기동 시 자동 시드
+> - **부스 운영(검색/추첨/재고)은 비인증 공개** (기획서 운영자 흐름), **어드민 페이지/API만 로그인 필요**, 초기 어드민은 앱 기동 시 자동 시드
 > - JWT 만료: 8시간
 > - 데이터 보존: 24개월 (수집일 기준), 만료 시 hard delete
 > - 차단 이메일 도메인: gmail.com, naver.com, empas.com, nate.com, daum.net, hanmail.net, hotmail.com, yahoo.co.kr, icloud.com, outlook.com, kakao.com
@@ -33,7 +33,7 @@
 - **Thymeleaf SSR 페이지**: 설문 폼 / Thank-you / 마감 / QR 풀스크린 / 어드민 폼 빌더
 - **행사별 QR 생성** (ZXing PNG + 부스 풀스크린 표시 페이지)
 - **폼 빌더**: `FormTemplate` JSONB 스키마, 행사마다 기본 템플릿 복사 후 커스텀 가능
-- 운영자 로그인 + 검색/추첨 (별도 SPA가 API 호출)
+- 검색/추첨/재고/이력 비인증 공개 (부스 운영자는 별도 로그인 없이 즉시 사용)
 - 어드민 로그인 + 행사·경품·운영자·리드·폼 관리
 - 일자별 중복 방지 + 유한 재고 추첨 (꽝 포함)
 - Ollama 로컬 LLM 리드 등급 분류
@@ -1733,7 +1733,7 @@ src/main/resources/templates/
 
 ### Phase 9 — 통합 & 데모 (2h 데모 + 잉여)
 - Phase 0~8 합계 ≈ 21h, **버퍼 + 데모 리허설 2~3h 확보 → 총 23~24h**
-- 데모 시나리오: 어드민 행사 생성 → 폼 커스텀 → 경품 세팅(`/admin/events/{id}/prizes`) → QR 풀스크린 → 모바일 QR 스캔 → 설문 → 운영자 로그인 → 검색 → 뽑기 → AI 등급 → 대시보드 → CSV 다운로드
+- 데모 시나리오: 어드민 행사 생성 → 폼 커스텀 → 경품 세팅(`/admin/events/{id}/prizes`) → QR 풀스크린 → 모바일 QR 스캔 → 설문 → (운영자가 부스에서 이름+휴대폰 뒷자리로) 검색 → 뽑기 → 어드민에서 AI 등급/대시보드/CSV 확인
 - 여유 시: 폼 시각화 빌더, follow-up message, XLSX export, 자동 파기 배치, 동의 철회 셀프 API
 
 ---
@@ -1899,7 +1899,7 @@ curl http://localhost:8080/actuator/health
 - ✅ 재고 정책: 전부 유한, 어드민 설정, 소진 시 꽝
 - ✅ 이메일 정책: 직무 기반 분기 (STUDENT_FREELANCER만 개인 메일 허용)
 - ✅ AI: Ollama (Docker, **CPU only, GPU 불요**), 모델 **`qwen2.5:1.5b`** (≈1GB, 메모리 3GB / CPU 2코어 상한)
-- ✅ 운영자/어드민 로그인 필요, 초기 어드민 자동 시드
+- ✅ 부스 운영(검색/추첨/재고)은 비인증 공개, 어드민만 로그인, 초기 어드민 자동 시드
 - ✅ JWT 만료: 8시간
 - ✅ 데이터 보존: 24개월, hard delete + 어드민 일괄 파기 API
 - ✅ 차단 도메인 11개 (§5.3)
@@ -1939,7 +1939,7 @@ curl http://localhost:8080/actuator/health
 2. **GPU 없이 CPU만으로 돌아가는 로컬 LLM** — Ollama + `qwen2.5:1.5b`(≈1GB), 메모리 3GB / CPU 2코어로 노트북에서도 시연. 데이터 외부 유출 없음
 3. **동시성 안전 추첨**: UNIQUE 제약 + 비관적 락으로 더블 추첨/음수 재고 차단
 4. **직무 기반 동적 검증**: STUDENT_FREELANCER만 개인 메일 허용, 나머지 14종 직무는 회사 메일 강제
-5. **역할 기반 접근 제어**: ADMIN(세팅·대시보드) / OPERATOR(현장 운영) 분리
+5. **현장 친화 접근 제어**: 부스 운영자는 별도 로그인 없이 검색/추첨 즉시 가능, 어드민(세팅·대시보드·CSV)만 로그인 (기획서 §4 운영자 흐름 반영)
 6. **JSONB 활용 풀 대시보드**: 8페이지 분기 설문 응답을 단일 컬럼에 보관, GIN 인덱스로 모니터링 제품·만족도 즉시 집계
 7. **법적 안전장치 내장**: 2년 자동 보존 + 만료 파기 API + 동의 시각 서버 기록
 8. **데이터 기반 폼 빌더**: 행사마다 폼을 JSONB로 정의·복사·커스텀 — 다음 행사에서 바로 재사용 가능
@@ -1953,4 +1953,4 @@ curl http://localhost:8080/actuator/health
 
 ---
 
-*이 계획서는 v9.1 (코드와 일치하도록 신규 endpoint 4종 상세 명세 보강: leads 필터 응답 형식, pending-scores 응답, rescore 응답, 대시보드 CSV 컬럼) 입니다.*
+*이 계획서는 v10 (부스 운영 endpoint 비인증 공개로 환원 — 기획서 §4 운영자 흐름 준수) 입니다.*
