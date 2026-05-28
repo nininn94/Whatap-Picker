@@ -287,7 +287,7 @@ export default function App() {
         <div className="mt-2 text-lg font-semibold text-white/70">{selectedResult.name}</div>
       </div>
       {!selectedResult.isMock && (
-        <Button type="button" size="lg" className="h-12 px-10 text-base font-bold" onClick={finishCycle}>
+        <Button type="button" className="h-12 px-10 text-base font-bold" onClick={finishCycle}>
           확인
         </Button>
       )}
