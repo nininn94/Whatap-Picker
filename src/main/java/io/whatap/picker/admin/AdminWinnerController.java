@@ -94,7 +94,7 @@ public class AdminWinnerController {
                 .toList();
     }
 
-    @GetMapping(value = "/api/admin/draw/winners.csv", produces = "text/csv;charset=UTF-8")
+    @GetMapping("/api/admin/draw/winners.csv")
     public ResponseEntity<StreamingResponseBody> exportCsv(@RequestParam String eventCode) {
         List<Map<String, Object>> winners = list(eventCode);
 

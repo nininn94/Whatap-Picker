@@ -184,7 +184,7 @@ public class AdminLeadController {
         return Map.of("deleted", count);
     }
 
-    @GetMapping(value = "/export.csv", produces = "text/csv;charset=UTF-8")
+    @GetMapping("/export.csv")
     public ResponseEntity<StreamingResponseBody> exportCsv(
             @RequestParam(required = false) String eventCode) {
 

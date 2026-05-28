@@ -23,7 +23,7 @@ public class DashboardCsvController {
         this.service = service;
     }
 
-    @GetMapping(value = "/summary.csv", produces = "text/csv;charset=UTF-8")
+    @GetMapping("/summary.csv")
     public ResponseEntity<StreamingResponseBody> summary(@RequestParam(required = false) String eventCode) {
         Map<String, Object> data = service.summary(eventCode);
         StreamingResponseBody body = out -> {
@@ -44,7 +44,7 @@ public class DashboardCsvController {
         return csvResponse(body, "dashboard-summary.csv");
     }
 
-    @GetMapping(value = "/timeline.csv", produces = "text/csv;charset=UTF-8")
+    @GetMapping("/timeline.csv")
     public ResponseEntity<StreamingResponseBody> timeline(@RequestParam(required = false) LocalDate from,
                                                           @RequestParam(required = false) LocalDate to) {
         Map<String, Object> data = service.timeline(from, to);
@@ -62,7 +62,7 @@ public class DashboardCsvController {
         return csvResponse(body, "dashboard-timeline.csv");
     }
 
-    @GetMapping(value = "/segments.csv", produces = "text/csv;charset=UTF-8")
+    @GetMapping("/segments.csv")
     public ResponseEntity<StreamingResponseBody> segments(@RequestParam(required = false) String eventCode) {
         Map<String, Object> data = service.segments(eventCode);
         StreamingResponseBody body = out -> {
@@ -80,7 +80,7 @@ public class DashboardCsvController {
         return csvResponse(body, "dashboard-segments.csv");
     }
 
-    @GetMapping(value = "/monitoring.csv", produces = "text/csv;charset=UTF-8")
+    @GetMapping("/monitoring.csv")
     public ResponseEntity<StreamingResponseBody> monitoring(@RequestParam(required = false) String eventCode) {
         Map<String, Object> data = service.monitoring(eventCode);
         StreamingResponseBody body = out -> {
@@ -98,7 +98,7 @@ public class DashboardCsvController {
         return csvResponse(body, "dashboard-monitoring.csv");
     }
 
-    @GetMapping(value = "/intent.csv", produces = "text/csv;charset=UTF-8")
+    @GetMapping("/intent.csv")
     public ResponseEntity<StreamingResponseBody> intent(@RequestParam(required = false) String eventCode) {
         Map<String, Object> data = service.intent(eventCode);
         StreamingResponseBody body = out -> {
