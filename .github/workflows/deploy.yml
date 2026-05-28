@@ -81,31 +81,62 @@ jobs:
           REGISTRY: ${{ env.REGISTRY }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          BOOTSTRAP_ADMIN_USERNAME: ${{ secrets.BOOTSTRAP_ADMIN_USERNAME }}
-          BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          APP_PUBLIC_BASE_URL: ${{ secrets.APP_PUBLIC_BASE_URL }}
+          EC2_PUBLIC_HOST: ${{ secrets.EC2_HOST }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: REGISTRY,IMAGE_NAME,IMAGE_TAG,JWT_SECRET,BOOTSTRAP_ADMIN_USERNAME,BOOTSTRAP_ADMIN_PASSWORD,POSTGRES_PASSWORD,APP_PUBLIC_BASE_URL
+          envs: REGISTRY,IMAGE_NAME,IMAGE_TAG,EC2_PUBLIC_HOST
           script: |
             set -euo pipefail
 
             cd /opt/whatap-picker
 
+            # ─────────────────────────────────────────────────────────
+            # 시크릿 자동 생성 (첫 배포 시 1회만, 이후 재사용)
+            # 재생성하려면 해당 파일 삭제 후 재배포
+            # ─────────────────────────────────────────────────────────
+            mkdir -p .secrets
+            chmod 700 .secrets
+
+            ADMIN_PW_FRESH=0
+
+            if [ ! -s .secrets/jwt_secret ]; then
+              openssl rand -base64 32 > .secrets/jwt_secret
+              chmod 600 .secrets/jwt_secret
+              echo "Generated new JWT_SECRET"
+            fi
+
+            if [ ! -s .secrets/postgres_password ]; then
+              openssl rand -base64 24 | tr -d '/+=' | cut -c1-32 > .secrets/postgres_password
+              chmod 600 .secrets/postgres_password
+              echo "Generated new POSTGRES_PASSWORD"
+            fi
+
+            if [ ! -s .secrets/admin_password ]; then
+              openssl rand -base64 18 | tr -d '/+=' | cut -c1-24 > .secrets/admin_password
+              chmod 600 .secrets/admin_password
+              ADMIN_PW_FRESH=1
+              echo "Generated new BOOTSTRAP_ADMIN_PASSWORD"
+            fi
+
+            JWT_SECRET=$(cat .secrets/jwt_secret)
+            POSTGRES_PASSWORD=$(cat .secrets/postgres_password)
+            BOOTSTRAP_ADMIN_PASSWORD=$(cat .secrets/admin_password)
+
+            # ─────────────────────────────────────────────────────────
+            # .env 작성 (매 배포마다 새로)
+            # ─────────────────────────────────────────────────────────
             umask 077
             cat > .env <<EOF
             REGISTRY=${REGISTRY}
             IMAGE_NAME=${IMAGE_NAME}
             IMAGE_TAG=${IMAGE_TAG}
             JWT_SECRET=${JWT_SECRET}
-            BOOTSTRAP_ADMIN_USERNAME=${BOOTSTRAP_ADMIN_USERNAME:-admin}
+            BOOTSTRAP_ADMIN_USERNAME=admin
             BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD}
             POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-            APP_PUBLIC_BASE_URL=${APP_PUBLIC_BASE_URL}
+            APP_PUBLIC_BASE_URL=http://${EC2_PUBLIC_HOST}:8080
             SPRING_AI_OLLAMA_INIT_PULL_MODEL_STRATEGY=never
             EOF
 
@@ -115,6 +146,22 @@ jobs:
 
             # 8GB 디스크 보호: 24h 이상 된 dangling 이미지 정리
             docker image prune -af --filter "until=24h" || true
+
+            # ─────────────────────────────────────────────────────────
+            # 첫 배포 안내 — 비밀번호 자체는 로그에 안 찍음 (public repo 안전)
+            # ─────────────────────────────────────────────────────────
+            if [ "$ADMIN_PW_FRESH" = "1" ]; then
+              echo ""
+              echo "============================================================"
+              echo "FIRST DEPLOY — admin password auto-generated."
+              echo "SSH into EC2 and read it:"
+              echo ""
+              echo "    cat /opt/whatap-picker/.secrets/admin_password"
+              echo ""
+              echo "  username: admin"
+              echo "  URL:      http://${EC2_PUBLIC_HOST}:8080"
+              echo "============================================================"
+            fi
 
       - name: Health check
         env:

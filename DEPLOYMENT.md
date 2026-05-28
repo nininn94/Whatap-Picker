@@ -95,24 +95,60 @@ docker ps   # 권한 없이 잘 나오면 OK
 
 ### 2.3 GitHub Secrets 등록
 
-`https://github.com/nininn94/Whatap-Picker/settings/secrets/actions` 에서 **New repository secret** 으로 다음 8개 등록:
+`https://github.com/nininn94/Whatap-Picker/settings/secrets/actions` 에서 **New repository secret** 으로 **3개**만 등록하면 됩니다.
 
 | Secret 이름 | 값 | 만드는 법 |
 | --- | --- | --- |
 | `EC2_HOST` | EC2 퍼블릭 IP 또는 DNS | AWS 콘솔에서 복사 |
 | `EC2_USER` | `ec2-user` | AL2023 기본 사용자 |
 | `EC2_SSH_KEY` | `picker-key.pem` 파일 **전체 내용** (`-----BEGIN ...` 부터 `END ...-----` 까지) | 로컬에서 `cat picker-key.pem` 결과 복사 |
-| `JWT_SECRET` | 32바이트 랜덤 문자열 | `openssl rand -base64 32` |
-| `BOOTSTRAP_ADMIN_USERNAME` | `admin` (또는 원하는 값) | 직접 입력 |
-| `BOOTSTRAP_ADMIN_PASSWORD` | 강한 비밀번호 | 직접 생성 (예: 1Password 등) |
-| `POSTGRES_PASSWORD` | 강한 비밀번호 | 직접 생성 |
-| `APP_PUBLIC_BASE_URL` | `http://<EC2_PUBLIC_IP>:8080` | EC2 퍼블릭 IP에 맞춰 작성 |
 
 > ⚠️ `EC2_SSH_KEY`는 줄바꿈 포함 그대로 붙여넣어야 합니다. GitHub UI에서 자동으로 보존됩니다.
 
-> ⚠️ `JWT_SECRET`, `POSTGRES_PASSWORD`는 **한 번 정하면 바꾸지 마세요**.
-> - `JWT_SECRET` 변경 시 발급된 운영자 JWT 토큰이 모두 무효화 (재로그인 필요)
-> - `POSTGRES_PASSWORD` 변경 시 기존 DB 볼륨과 불일치하여 앱이 DB 접속 실패. 변경하려면 EC2에서 `docker compose down -v`로 볼륨 삭제하고 처음부터 (데이터 다 날아감)
+#### 나머지 시크릿은 EC2가 알아서
+
+다음 값들은 **첫 배포 때 EC2가 `openssl rand`로 자동 생성**하고 `/opt/whatap-picker/.secrets/` 에 저장합니다. 이후 배포는 그 파일을 그대로 읽어 재사용합니다 (덮어쓰지 않음).
+
+| 자동 생성 항목 | 저장 위치 | 길이 |
+| --- | --- | --- |
+| JWT 서명 키 (`JWT_SECRET`) | `/opt/whatap-picker/.secrets/jwt_secret` | base64 32바이트 |
+| Postgres 비밀번호 (`POSTGRES_PASSWORD`) | `/opt/whatap-picker/.secrets/postgres_password` | 32자 |
+| 초기 어드민 비밀번호 (`BOOTSTRAP_ADMIN_PASSWORD`) | `/opt/whatap-picker/.secrets/admin_password` | 24자 |
+
+추가로 다음은 워크플로우가 자동으로 도출합니다.
+
+| 자동 도출 항목 | 도출 방식 |
+| --- | --- |
+| `BOOTSTRAP_ADMIN_USERNAME` | 항상 `admin` (필요 시 EC2의 `.env` 직접 편집) |
+| `APP_PUBLIC_BASE_URL` | `http://${EC2_HOST}:8080` |
+
+**첫 배포 후 어드민 비밀번호 확인**
+
+GHA 로그에는 비밀번호 평문이 안 찍힙니다 (public repo 보호). 첫 배포 완료 메시지에 안내된 대로 EC2에 SSH 접속해서 직접 확인:
+
+```bash
+ssh -i ~/Downloads/picker-key.pem ec2-user@<EC2_PUBLIC_IP>
+cat /opt/whatap-picker/.secrets/admin_password
+```
+
+확인 후 1Password 등 안전한 곳에 옮겨두세요.
+
+**값 회전 (rotation)**
+
+특정 시크릿을 새로 생성하고 싶을 때:
+
+```bash
+ssh -i ~/Downloads/picker-key.pem ec2-user@<EC2_PUBLIC_IP>
+
+# 어드민 비밀번호 회전
+rm /opt/whatap-picker/.secrets/admin_password
+# JWT 키 회전 (모든 운영자 토큰 무효화 — 재로그인 필요)
+rm /opt/whatap-picker/.secrets/jwt_secret
+```
+
+다음 배포 (또는 GHA UI에서 **Run workflow** 수동 실행) 시 누락된 파일만 새로 생성됩니다.
+
+> ⚠️ `postgres_password`는 함부로 회전하지 마세요. 기존 DB 볼륨과 불일치하면 앱이 DB 접속 실패합니다. 회전하려면 데이터 손실 감수하고 `docker compose down -v` 후 재배포.
 
 ---
 
@@ -129,8 +165,10 @@ GitHub Actions가:
 2. Dockerfile로 이미지 빌드 (`ghcr.io/nininn94/whatap-picker:latest` + `:<7자리 SHA>`)
 3. GHCR에 push (public repo라 누구나 pull 가능, EC2에서 인증 불요)
 4. EC2에 `docker-compose.prod.yml` scp
-5. EC2 SSH 접속 → `.env` 작성 → `docker compose pull && up -d`
+5. EC2 SSH 접속 → `.secrets/` 에 없는 시크릿 자동 생성 → `.env` 작성 → `docker compose pull && up -d`
 6. `http://<EC2_HOST>:8080/actuator/health` 가 200 OK 반환할 때까지 최대 150초 대기
+
+첫 배포 마지막에 GHA 로그가 `cat /opt/whatap-picker/.secrets/admin_password` 안내를 출력합니다. 그 비밀번호로 어드민 로그인하세요.
 
 진행 상황은 `https://github.com/nininn94/Whatap-Picker/actions` 에서 실시간 확인.
 
@@ -238,9 +276,9 @@ https://github.com/nininn94?tab=packages
 ## 6. 보안 체크리스트
 
 - [ ] `EC2_SSH_KEY`는 Secrets에만 두고 repo에 절대 커밋 안 함 (`.gitignore` 확인)
-- [ ] `.env` 파일은 EC2의 `/opt/whatap-picker/.env` 에만 존재, repo에는 안 들어감
-- [ ] `JWT_SECRET`은 최소 32바이트
-- [ ] `BOOTSTRAP_ADMIN_PASSWORD`는 강한 비밀번호 (12자 이상 + 영문 대소문자 + 숫자 + 특수문자)
+- [ ] `.env`/`.secrets/`는 EC2의 `/opt/whatap-picker/` 에만 존재, repo에 안 들어감
+- [ ] `.secrets/` 디렉토리 권한 700, 내부 파일 600 확인 (`ls -la /opt/whatap-picker/.secrets`)
+- [ ] 첫 배포 후 `cat /opt/whatap-picker/.secrets/admin_password`로 어드민 비번 받아서 1Password 등에 옮겨두기
 - [ ] SSH 포트(22)는 본인 IP나 GHA IP 대역만 허용 (가능하면)
 - [ ] 데모 종료 후 인스턴스 stop 또는 보안그룹 8080 닫기
 - [ ] 6개월마다 EC2 키 페어 회전 권장
@@ -263,3 +301,4 @@ t3.micro는 AWS 프리티어 1년 750h/월 무료. 그 이후:
 | 일자 | 내용 |
 | --- | --- |
 | 2026-05-28 | 초안 — t3.micro / AL2023 / 8GB 기준, GHA + GHCR + SSH 배포 |
+| 2026-05-28 | GitHub Secrets 8개 → 3개로 축소. JWT/Postgres/admin 비번은 EC2가 첫 배포 시 자동 생성 후 `.secrets/`에 보존, `APP_PUBLIC_BASE_URL`은 EC2_HOST에서 도출 |
