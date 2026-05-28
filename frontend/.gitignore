@@ -2,6 +2,9 @@ node_modules
 dist
 .next
 .vite
+.env
+.env.local
+.env.*.local
 *.tsbuildinfo
 playwright-report
 test-results
