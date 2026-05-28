@@ -1,1 +1,6 @@
 .DS_Store
+.claude/
+스크린샷*/
+*.png
+*.jpg
+*.jpeg
