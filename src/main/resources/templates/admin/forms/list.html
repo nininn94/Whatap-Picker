@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head(title='폼 템플릿')}"></head>
+<body>
+<nav th:replace="~{admin/layout :: nav}"></nav>
+<main class="admin-container">
+    <h1>폼 템플릿</h1>
+    <div class="card">
+        <p class="muted">시스템 기본 템플릿은 잠금되어 있습니다. 복사 후 커스텀하세요.</p>
+        <div id="form-list"></div>
+    </div>
+</main>
+<script>
+    async function load() {
+        const res = await fetch('/api/admin/forms', { headers: { 'Authorization':'Bearer ' + localStorage.getItem('jwt') }});
+        if (!res.ok) { document.getElementById('form-list').innerHTML = '<p>로드 실패</p>'; return; }
+        const list = await res.json();
+        const rows = list.map(f => `<tr>
+            <td>${f.name}</td><td>${f.isSystemDefault ? '시스템 기본' : '커스텀'}</td>
+            <td>v${f.version}</td><td>${new Date(f.updatedAt).toLocaleString()}</td>
+            <td><button class="btn btn-secondary" onclick='clonePrompt("${f.id}", "${f.name}")'>복사</button></td>
+        </tr>`).join('');
+        document.getElementById('form-list').innerHTML = `<table>
+            <thead><tr><th>이름</th><th>유형</th><th>버전</th><th>수정</th><th></th></tr></thead>
+            <tbody>${rows}</tbody></table>`;
+    }
+    async function clonePrompt(sourceId, srcName) {
+        const name = prompt('새 폼 이름:', srcName + ' (복사)');
+        if (!name) return;
+        const res = await fetch('/api/admin/forms/clone', {
+            method:'POST',
+            headers:{'Content-Type':'application/json','Authorization':'Bearer ' + localStorage.getItem('jwt')},
+            body: JSON.stringify({ sourceId, name })
+        });
+        if (res.ok) load();
+        else alert('복사 실패');
+    }
+    load();
+</script>
+<div th:replace="~{admin/layout :: scripts}"></div>
+</body>
+</html>

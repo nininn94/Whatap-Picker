@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head(title='Admin Home')}"></head>
+<body>
+<nav th:replace="~{admin/layout :: nav}"></nav>
+<main class="admin-container">
+    <h1>WhaTap Picker 어드민</h1>
+
+    <div class="card">
+        <h2>활성 행사</h2>
+        <table>
+            <thead>
+            <tr><th>코드</th><th>라벨</th><th>일자</th><th>상태</th><th></th></tr>
+            </thead>
+            <tbody>
+            <tr th:each="e : ${events}">
+                <td><a th:href="@{|/admin/events/${e.id}/prizes|}" th:text="${e.eventCode}"></a></td>
+                <td th:text="${e.label}"></td>
+                <td th:text="${e.eventDate}"></td>
+                <td>
+                    <span th:class="'status-badge status-' + ${e.status}" th:text="${e.status}"></span>
+                </td>
+                <td>
+                    <a class="btn btn-secondary" th:href="@{|/event/${e.eventCode}/qr|}" target="_blank">QR</a>
+                </td>
+            </tr>
+            <tr th:if="${#lists.isEmpty(events)}">
+                <td colspan="5">등록된 행사가 없습니다.</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</main>
+<div th:replace="~{admin/layout :: scripts}"></div>
+</body>
+</html>

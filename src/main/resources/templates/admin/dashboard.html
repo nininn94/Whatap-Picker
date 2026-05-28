@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head(title='대시보드')}"></head>
+<body>
+<nav th:replace="~{admin/layout :: nav}"></nav>
+<main class="admin-container">
+    <h1>대시보드</h1>
+    <div class="card">
+        <select id="event-filter">
+            <option value="">전체</option>
+            <option th:each="e : ${events}" th:value="${e.eventCode}" th:text="|${e.eventCode} - ${e.label}|"></option>
+        </select>
+    </div>
+    <div class="dashboard-grid" id="summary-cards"></div>
+    <div class="card"><h2>관심 제품 / 도입 계획</h2><div id="intent-data"></div></div>
+    <div class="card"><h2>모니터링 사용 현황</h2><div id="monitoring-data"></div></div>
+</main>
+<script>
+    async function fetchJson(url) {
+        const res = await fetch(url, { headers: { 'Authorization':'Bearer ' + localStorage.getItem('jwt') }});
+        if (!res.ok) return null;
+        return res.json();
+    }
+    async function load() {
+        const ec = document.getElementById('event-filter').value;
+        const param = ec ? `?eventCode=${encodeURIComponent(ec)}` : '';
+        const s = await fetchJson('/api/admin/dashboard/summary' + param);
+        if (s) {
+            document.getElementById('summary-cards').innerHTML = `
+                <div class="dashboard-card"><div class="label">총 리드</div><div class="value">${s.leadCount ?? 0}</div></div>
+                <div class="dashboard-card"><div class="label">추첨</div><div class="value">${s.drawCount ?? 0}</div></div>
+                <div class="dashboard-card"><div class="label">상담 희망</div><div class="value">${s.wantsConsultationCount ?? 0}</div></div>
+                <div class="dashboard-card"><div class="label">유효 메일 비율</div><div class="value">${(((s.validEmailRatio ?? 0) * 100)|0)}%</div></div>
+                <div class="dashboard-card"><div class="label">거부 이메일</div><div class="value">${s.emailRejectionCount ?? 0}</div></div>`;
+        }
+        const intent = await fetchJson('/api/admin/dashboard/intent' + param);
+        if (intent) document.getElementById('intent-data').textContent = JSON.stringify(intent, null, 2);
+        const monitoring = await fetchJson('/api/admin/dashboard/monitoring' + param);
+        if (monitoring) document.getElementById('monitoring-data').textContent = JSON.stringify(monitoring, null, 2);
+    }
+    document.getElementById('event-filter').addEventListener('change', load);
+    load();
+</script>
+<div th:replace="~{admin/layout :: scripts}"></div>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head(title='경품 재고 관리')}"></head>
+<body>
+<nav th:replace="~{admin/layout :: nav}"></nav>
+<main class="admin-container" x-data="prizeManager()">
+    <h1 th:text="|${event.label} - 경품 재고 관리|"></h1>
+    <p class="muted" th:text="|이벤트 코드: ${event.eventCode} | 상태: ${event.status}|"></p>
+
+    <div class="card">
+        <table>
+            <thead>
+            <tr>
+                <th>등수</th><th>경품명</th><th>초기 수량</th>
+                <th>당첨 수</th><th>잔여</th><th>소진율</th><th></th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="p : ${prizes}" th:attr="data-id=${p.id}">
+                <td th:text="${p.rank}"></td>
+                <td><input type="text" th:value="${p.name}" :name="'name-' + [[${p.id}]]"></td>
+                <td><input type="number" min="0" th:value="${p.initialQty}" :name="'initial-' + [[${p.id}]]"></td>
+                <td th:text="${p.initialQty - p.remainingQty}"></td>
+                <td th:text="${p.remainingQty}"></td>
+                <td>
+                    <span th:text="${#numbers.formatPercent((p.initialQty - p.remainingQty) * 1.0 / (p.initialQty == 0 ? 1 : p.initialQty), 1, 0)}"></span>
+                </td>
+                <td>
+                    <button class="btn btn-primary" @click="save([[${p.id}]])">저장</button>
+                </td>
+            </tr>
+            <tr th:if="${#lists.isEmpty(prizes)}">
+                <td colspan="7">
+                    아직 등록된 경품이 없습니다. <code>POST /api/admin/events/{id}/prizes</code> 로 일괄 등록해주세요.
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <p class="muted" th:if="${event.formLocked}">
+        ⚠️ 이 행사는 이미 응답이 시작되어 폼 변경이 불가합니다. (경품 수량은 차감된 양 이하로만 줄일 수 없음)
+    </p>
+</main>
+<script th:inline="javascript">
+    const eventId = /*[[${event.id}]]*/ '';
+    function prizeManager() {
+        return {
+            async save(prizeId) {
+                const row = document.querySelector(`tr[data-id='${prizeId}']`);
+                const name = row.querySelector(`input[name='name-${prizeId}']`).value;
+                const initial = parseInt(row.querySelector(`input[name='initial-${prizeId}']`).value, 10);
+                const res = await fetch(`/api/admin/prizes/${prizeId}`, {
+                    method: 'PATCH',
+                    headers: {'Content-Type':'application/json','Authorization':'Bearer ' + localStorage.getItem('jwt')},
+                    body: JSON.stringify({ name, initialQty: initial })
+                });
+                if (res.ok) location.reload();
+                else alert('저장 실패: ' + res.status);
+            }
+        };
+    }
+</script>
+<div th:replace="~{admin/layout :: scripts}"></div>
+</body>
+</html>

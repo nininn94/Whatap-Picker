@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head(title='행사 관리')}"></head>
+<body>
+<nav th:replace="~{admin/layout :: nav}"></nav>
+<main class="admin-container">
+    <h1>행사 관리</h1>
+    <div class="card">
+        <p class="muted">행사 생성은 <code>POST /api/admin/events</code> 를 통해 가능합니다. (UI는 추후)</p>
+        <table>
+            <thead>
+            <tr><th>코드</th><th>라벨</th><th>일자</th><th>상태</th><th>경품</th><th>QR</th></tr>
+            </thead>
+            <tbody>
+            <tr th:each="e : ${events}">
+                <td th:text="${e.eventCode}"></td>
+                <td th:text="${e.label}"></td>
+                <td th:text="${e.eventDate}"></td>
+                <td><span th:class="'status-badge status-' + ${e.status}" th:text="${e.status}"></span></td>
+                <td><a class="btn btn-secondary" th:href="@{|/admin/events/${e.id}/prizes|}">재고 관리</a></td>
+                <td><a class="btn btn-secondary" th:href="@{|/event/${e.eventCode}/qr|}" target="_blank">QR</a></td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</main>
+<div th:replace="~{admin/layout :: scripts}"></div>
+</body>
+</html>

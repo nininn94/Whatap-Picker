@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head(title='리드 조회')}"></head>
+<body>
+<nav th:replace="~{admin/layout :: nav}"></nav>
+<main class="admin-container">
+    <h1>리드 조회</h1>
+    <div class="card">
+        <p class="muted">필터 + CSV 다운로드. JWT 필요 — <code>localStorage.jwt</code> 에 토큰을 저장한 뒤 새로 고침.</p>
+        <button class="btn btn-primary" onclick="downloadCsv()">CSV 다운로드</button>
+        <select id="event-filter">
+            <option value="">전체 행사</option>
+            <option th:each="e : ${events}" th:value="${e.eventCode}" th:text="|${e.eventCode} - ${e.label}|"></option>
+        </select>
+        <div id="leads-table"></div>
+    </div>
+</main>
+<script>
+    async function loadLeads() {
+        const ec = document.getElementById('event-filter').value;
+        const url = '/api/admin/leads' + (ec ? `?eventCode=${encodeURIComponent(ec)}` : '');
+        const res = await fetch(url, { headers: { 'Authorization':'Bearer ' + localStorage.getItem('jwt') }});
+        if (!res.ok) { document.getElementById('leads-table').innerHTML = '<p>로드 실패</p>'; return; }
+        const data = await res.json();
+        const rows = (data.content || []).map(l => `
+            <tr><td>${l.name}</td><td>${l.company}</td><td>${l.industry}</td>
+            <td>${l.jobLevel}</td><td>${l.monitoringStatus}</td><td>${new Date(l.createdAt).toLocaleString()}</td></tr>`).join('');
+        document.getElementById('leads-table').innerHTML = `<table>
+            <thead><tr><th>이름</th><th>회사</th><th>산업</th><th>직급</th><th>모니터링</th><th>제출</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="6">데이터 없음</td></tr>'}</tbody></table>`;
+    }
+    async function downloadCsv() {
+        const ec = document.getElementById('event-filter').value;
+        const url = '/api/admin/leads/export.csv' + (ec ? `?eventCode=${encodeURIComponent(ec)}` : '');
+        const res = await fetch(url, { headers: { 'Authorization':'Bearer ' + localStorage.getItem('jwt') }});
+        if (!res.ok) { alert('CSV 다운로드 실패'); return; }
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = res.headers.get('Content-Disposition')?.match(/filename="(.+?)"/)?.[1] || 'leads.csv';
+        a.click();
+    }
+    document.getElementById('event-filter').addEventListener('change', loadLeads);
+    loadLeads();
+</script>
+<div th:replace="~{admin/layout :: scripts}"></div>
+</body>
+</html>

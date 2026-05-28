@@ -1,5 +1,7 @@
 package io.whatap.picker.lead;
 
+import io.whatap.picker.ai.LeadScore;
+import io.whatap.picker.ai.LeadScoreRepository;
 import io.whatap.picker.common.ApiException;
 import io.whatap.picker.common.ErrorCode;
 import io.whatap.picker.draw.DrawHistory;
@@ -19,13 +21,16 @@ public class LeadSearchService {
     private final LeadRepository leadRepository;
     private final EventRepository eventRepository;
     private final DrawHistoryRepository drawHistoryRepository;
+    private final LeadScoreRepository leadScoreRepository;
 
     public LeadSearchService(LeadRepository leadRepository,
                              EventRepository eventRepository,
-                             DrawHistoryRepository drawHistoryRepository) {
+                             DrawHistoryRepository drawHistoryRepository,
+                             LeadScoreRepository leadScoreRepository) {
         this.leadRepository = leadRepository;
         this.eventRepository = eventRepository;
         this.drawHistoryRepository = drawHistoryRepository;
+        this.leadScoreRepository = leadScoreRepository;
     }
 
     @Transactional(readOnly = true)
@@ -46,6 +51,12 @@ public class LeadSearchService {
         List<LeadSearchResponse.Item> items = leads.stream().map(lead -> {
             Optional<DrawHistory> history = drawHistoryRepository
                     .findByLeadIdAndEventId(lead.getId(), event.getId());
+            LeadSearchResponse.AiStatusInfo ai = leadScoreRepository.findByLeadId(lead.getId())
+                    .map(s -> new LeadSearchResponse.AiStatusInfo(
+                            s.getAiStatus().name(),
+                            s.getGrade() == null ? null : s.getGrade().name(),
+                            s.getScore() == null ? null : s.getScore().intValue()))
+                    .orElse(new LeadSearchResponse.AiStatusInfo("PENDING", null, null));
             return new LeadSearchResponse.Item(
                     lead.getId(),
                     lead.getLastName() + lead.getFirstName(),
@@ -54,7 +65,7 @@ public class LeadSearchService {
                     lead.getCompany(),
                     history.isPresent(),
                     history.map(DrawHistory::getDrawnAt).orElse(null),
-                    null // Phase 8에서 LeadScore lookup 채움
+                    ai
             );
         }).toList();
 
