@@ -93,6 +93,18 @@ ai-scoring:
     initial-delay-ms: 30000
     multiplier: 10
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+  health:
+    ollama:
+      enabled: false   # EC2 운영에는 Ollama 미배치 — health indicator 비활성화
+
 logging:
   level:
     io.whatap.picker: INFO

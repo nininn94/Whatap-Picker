@@ -148,6 +148,25 @@ jobs:
             docker image prune -af --filter "until=24h" || true
 
             # ─────────────────────────────────────────────────────────
+            # 진단: 컨테이너 상태와 로그를 Actions 로그에 노출.
+            # 8080 헬스체크가 외부에서 실패해도 여기서 내부 상태 확인 가능.
+            # ─────────────────────────────────────────────────────────
+            echo ""
+            echo "===== [diagnostic] sleep 40s for app warm-up ====="
+            sleep 40
+            echo "===== [diagnostic] docker compose ps ====="
+            docker compose -f docker-compose.prod.yml ps
+            echo "===== [diagnostic] docker stats (single shot) ====="
+            docker stats --no-stream || true
+            echo "===== [diagnostic] internal curl localhost:8080/actuator/health ====="
+            curl -sS --max-time 5 http://localhost:8080/actuator/health || echo "(internal curl FAILED)"
+            echo ""
+            echo "===== [diagnostic] postgres logs (tail 30) ====="
+            docker compose -f docker-compose.prod.yml logs --tail 30 postgres || true
+            echo "===== [diagnostic] app logs (tail 120) ====="
+            docker compose -f docker-compose.prod.yml logs --tail 120 app || true
+
+            # ─────────────────────────────────────────────────────────
             # 첫 배포 안내 — 비밀번호 자체는 로그에 안 찍음 (public repo 안전)
             # ─────────────────────────────────────────────────────────
             if [ "$ADMIN_PW_FRESH" = "1" ]; then
