@@ -1611,7 +1611,7 @@ src/main/resources/templates/
 - Ollama 컨테이너에 `qwen2.5:1.5b` pull (`spring.ai.ollama.init.pull-model-strategy=when_missing`로 앱이 자동 처리도 가능)
 
 ### Phase 1 — 인증 (1.5h)
-- `AppUser` + BCrypt, Spring Security 6 + JWT
+- `AppUser` + BCrypt, Spring Security 7 + JWT
 - `POST /api/auth/login`, `BootstrapAdminRunner`
 
 ### Phase 2 — 설문 도메인 (3h)
@@ -1654,14 +1654,14 @@ src/main/resources/templates/
 - `LeadScoreResult` record + Spring AI 구조화 출력 (BeanOutputConverter 자동)
 - `AiRuleEvaluator` JSONB condition 평가
 - `LeadScoringPipeline` (룰 선적용 → `ChatClient.entity()` 폴백)
-- `@Async` + `@Retryable` 백오프 (`spring.ai.retry.*`로도 설정 가능)
+- `@Async` + `@Retryable(maxAttempts=3, backoff=@Backoff(delay=30000, multiplier=10))` (spring-retry 의존성 필요)
 - 시드 룰 10개 + 시드 프롬프트 1개 Flyway 마이그레이션
 - `PATCH /api/admin/leads/{id}/score` 수동 수정
 - `/api/admin/ai-rules`, `/api/admin/ai-prompts` CRUD + SSR 페이지
 - `PendingMonitorJob` (PENDING 1h+ 카운트)
 
 ### Phase 9 — 통합 & 데모 (2h 데모 + 잉여)
-- Phase 0~8 합계 ≈ 20.5h, **버퍼 + 데모 리허설 2~3h 확보 → 총 22.5~24h**
+- Phase 0~8 합계 ≈ 21h, **버퍼 + 데모 리허설 2~3h 확보 → 총 23~24h**
 - 데모 시나리오: 어드민 행사 생성 → 폼 커스텀 → 경품 세팅(`/admin/events/{id}/prizes`) → QR 풀스크린 → 모바일 QR 스캔 → 설문 → 운영자 로그인 → 검색 → 뽑기 → AI 등급 → 대시보드 → CSV 다운로드
 - 여유 시: 폼 시각화 빌더, follow-up message, XLSX export, 자동 파기 배치, 동의 철회 셀프 API
 
@@ -1709,12 +1709,9 @@ spring.ai:
         num-predict: 200
         top-p: 0.9
 
-  # 호출 옵션
-  retry:
-    max-attempts: 3
-    backoff:
-      initial-interval: 30s
-      multiplier: 10                         # 30s → 5m → 50m
+# 재시도는 yml 키가 아닌 @Retryable로 (§4.6.9 코드 참고)
+# @Retryable(maxAttempts=3, backoff=@Backoff(delay=30000, multiplier=10))
+# → 30s → 5m → 50m
 
 security:
   jwt:
