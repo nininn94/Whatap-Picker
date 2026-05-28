@@ -192,6 +192,7 @@ export default function App() {
       phoneLastFour: "",
     });
     setParticipantError("");
+    setConfettiTrigger(0);
   }
 
   function showResult(result: PickResult) {
