@@ -95,7 +95,7 @@ docker ps   # 권한 없이 잘 나오면 OK
 
 ### 2.3 GitHub Secrets 등록
 
-`https://github.com/jin-0309/Whatap-Picker/settings/secrets/actions` 에서 **New repository secret** 으로 다음 8개 등록:
+`https://github.com/nininn94/Whatap-Picker/settings/secrets/actions` 에서 **New repository secret** 으로 다음 8개 등록:
 
 | Secret 이름 | 값 | 만드는 법 |
 | --- | --- | --- |
@@ -126,13 +126,13 @@ git push origin main
 
 GitHub Actions가:
 1. `gradle bootJar` 로 jar 빌드 (테스트 스킵)
-2. Dockerfile로 이미지 빌드 (`ghcr.io/jin-0309/whatap-picker:latest` + `:<7자리 SHA>`)
+2. Dockerfile로 이미지 빌드 (`ghcr.io/nininn94/whatap-picker:latest` + `:<7자리 SHA>`)
 3. GHCR에 push (public repo라 누구나 pull 가능, EC2에서 인증 불요)
 4. EC2에 `docker-compose.prod.yml` scp
 5. EC2 SSH 접속 → `.env` 작성 → `docker compose pull && up -d`
 6. `http://<EC2_HOST>:8080/actuator/health` 가 200 OK 반환할 때까지 최대 150초 대기
 
-진행 상황은 `https://github.com/jin-0309/Whatap-Picker/actions` 에서 실시간 확인.
+진행 상황은 `https://github.com/nininn94/Whatap-Picker/actions` 에서 실시간 확인.
 
 배포 완료 후:
 ```
@@ -229,7 +229,7 @@ cron이 매일 새벽 4시 자동 정리하지만, 해커톤 중 빌드를 자�
 Public repo + public image면 인증 불요지만, 패키지가 private으로 생성됐을 수 있음.
 
 ```
-https://github.com/jin-0309?tab=packages
+https://github.com/nininn94?tab=packages
 → whatap-picker → Package settings → Change visibility → Public
 ```
 
