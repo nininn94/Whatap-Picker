@@ -23,3 +23,7 @@ hs_err_pid*
 .env
 .env.local
 *.local.yml
+
+# 인프라 정보가 담긴 로컬 문서 (공개 저장소라 커밋 제외)
+# 인스턴스 ID·퍼블릭 DNS·SSH 접속 정보가 들어 있어 로컬에서만 본다
+docs/AWS EC2 인스턴스 생성 가이드.md
